@@ -2,12 +2,6 @@
 
 Описание системы TaskBuddy по состоянию на ТЗ от 25 ноября 2026, дополнено 26 ноября 2026 требованиями из документа «TaskBuddy add-ons».
 
-## Background
-
-- used Getting Things Done earlier on a PDA, which was stolen in Barcelona along with her bag; has not managed to set up a system again since
-- now a big paper notebook with a page per context (call, go, buy, repair, children, health), 200-300 tasks stored there like a warehouse; a small notebook inside it for today's tasks; new tasks go straight into the small notebook, bypassing the big one; torn-out pages pile up on the desk; no real inbox
-- she has ADHD; the problem is doing what is interesting or new instead of what is needed, not forgetting deadlines; she also misses deadlines (e.g. a parcel return by post, buying champagne for Christmas); many work plans exist only in her head and are not written down
-
 ## Принципы
 
 - одно хранилище для всех дел, рабочих и домашних; добавлять легко, диктовкой или текстом; входящие разбирает пользователь, а Claude по расписанию заранее предлагает параметры
