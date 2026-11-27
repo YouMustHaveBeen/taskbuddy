@@ -118,7 +118,7 @@ Cron раз в минуту ─────────┘
 | daily\_stats | user, date, сделано задач / рутин / минут практик; не удаляется с архивом |
 | jobs | будущие действия: тип, user, run\_at, payload, claimed\_at, done\_at |
 | timers | user, kind (task / zone / reward), item\_id, minutes (5 / 10 / 15 / 25), started\_at, paused\_at, remaining\_sec, ends\_at, started\_in (bot / web), bot\_message\_id |
-| вход | sessions, oauth (токены в KV), invites (код приглашения в семью) |
+| вход | sessions, oauth (токены в KV), invites (код приглашения в семью), tg\_updates (номера обновлений Telegram для защиты от повторов; старше суток удаляются, срок — настройка) |
 
 ### 5.2. Решения по схеме
 
