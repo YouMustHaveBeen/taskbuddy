@@ -1,6 +1,7 @@
 import { Bot } from "grammy/web";
 import { pickLanguage, t, type Language } from "../../i18n";
 import { createLoginLink, registerByInvite } from "../core/auth";
+import { items } from "../core/items";
 import { defaults } from "../core/settings";
 import type { Db } from "../db/client";
 import { findUserByTelegramId } from "../db/users";
@@ -44,6 +45,17 @@ export async function createBot(env: Env, db: Db, origin: string): Promise<Bot> 
       count: defaults.loginLinkTtlMinutes,
     });
     await ctx.reply(`${text}\n${origin}/?login=${encodeURIComponent(token)}`);
+  });
+
+  chat.on("message:text", async (ctx) => {
+    if (ctx.message.text.startsWith("/")) return;
+    const user = await findUserByTelegramId(db, ctx.from.id);
+    if (!user) {
+      await ctx.reply(t(pickLanguage(ctx.from.language_code), "bot.start.private"));
+      return;
+    }
+    const { outcome } = await items.addInbox(db, user.id, ctx.message.text, "bot");
+    if (outcome === "ok") await ctx.reply(t(user.language as Language, "bot.inbox.saved"));
   });
 
   return bot;
