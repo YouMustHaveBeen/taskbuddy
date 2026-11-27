@@ -1,11 +1,13 @@
 import { StrictMode, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { pickLanguage, t, type Language } from "../../i18n";
+import { Inbox } from "./Inbox";
 import { References } from "./References";
 import { forgetSession, signIn, type PageUser } from "./session";
 
 function App() {
   const [state, setState] = useState<{ user?: PageUser } | undefined>();
+  const [tab, setTab] = useState<"inbox" | "references">("inbox");
 
   useEffect(() => {
     signIn()
@@ -25,9 +27,22 @@ function App() {
     <>
       <p>{t(language, "web.signedIn", { name: state.user.name })}</p>
       <nav>
-        <span aria-current="page">{t(language, "tab.references")}</span>
+        {(["inbox", "references"] as const).map((name) => (
+          <button
+            key={name}
+            type="button"
+            aria-current={tab === name ? "page" : undefined}
+            onClick={() => setTab(name)}
+          >
+            {t(language, name === "inbox" ? "tab.inbox" : "tab.references")}
+          </button>
+        ))}
       </nav>
-      <References language={language} onSignedOut={signedOut} />
+      {tab === "inbox" ? (
+        <Inbox language={language} onSignedOut={signedOut} />
+      ) : (
+        <References language={language} onSignedOut={signedOut} />
+      )}
     </>
   );
 }
