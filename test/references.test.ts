@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { defaults } from "../src/core/settings";
-import { api, createUser, resetDb } from "./helpers";
+import { api, call, createUser, resetDb } from "./helpers";
 
 type Lists = {
   spheres: { id: string; name: string }[];
@@ -35,6 +35,11 @@ describe("справочники: доступ", () => {
     const response = await api("forged", "GET", "/references");
     expect(response.status).toBe(401);
     expect((await api("forged", "POST", "/references/spheres", { name: "дом" })).status).toBe(401);
+  });
+
+  it("схема Bearer принимается в любом регистре", async () => {
+    const response = await call("/api/references", { headers: { Authorization: `bearer ${ann.token}` } });
+    expect(response.status).toBe(200);
   });
 
   it("пользователь не видит чужие значения", async () => {

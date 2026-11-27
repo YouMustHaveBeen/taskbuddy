@@ -13,7 +13,9 @@ type Lists = {
   compat: Pair[];
 };
 
-type Props = { language: Language };
+type Props = { language: Language; onSignedOut: () => void };
+type Run = (method: string, path: string, body?: unknown) => Promise<boolean>;
+type Text = (key: TextKey) => string;
 
 const errorKeys: Record<string, TextKey> = {
   duplicate: "error.duplicate",
@@ -21,35 +23,36 @@ const errorKeys: Record<string, TextKey> = {
   invalid: "error.invalid",
 };
 
-export function References({ language }: Props) {
+export function References({ language, onSignedOut }: Props) {
   const [lists, setLists] = useState<Lists>();
   const [error, setError] = useState<string>();
-  const [version, setVersion] = useState(0);
 
   const reload = useCallback(async () => {
     const result = await api<Lists>("GET", "/references");
+    if (result.status === 401) onSignedOut();
     if (result.data) setLists(result.data);
-  }, []);
+  }, [onSignedOut]);
 
   useEffect(() => {
     void reload();
   }, [reload]);
 
-  const run = useCallback(
-    async (method: string, path: string, body?: unknown) => {
+  const run = useCallback<Run>(
+    async (method, path, body) => {
       const result = await api(method, path, body);
+      if (result.status === 401) onSignedOut();
       setError(result.ok ? undefined : (result.error ?? "generic"));
       await reload();
-      setVersion((value) => value + 1);
+      return result.ok;
     },
-    [reload],
+    [reload, onSignedOut],
   );
 
   if (!lists) return null;
-  const text = (key: TextKey) => t(language, key);
+  const text: Text = (key) => t(language, key);
 
   return (
-    <div key={version}>
+    <div>
       {error && <p role="alert">{text(errorKeys[error] ?? "error.generic")}</p>}
       <NameSection title={text("references.areas")} path="spheres" rows={lists.spheres} run={run} text={text} />
       <NameSection title={text("references.kinds")} path="action-kinds" rows={lists.actionKinds} run={run} text={text} />
@@ -60,8 +63,30 @@ export function References({ language }: Props) {
   );
 }
 
-type Run = (method: string, path: string, body?: unknown) => Promise<void>;
-type Text = (key: TextKey) => string;
+function EditableField(props: {
+  label: string;
+  value: string;
+  type?: "text" | "number";
+  onCommit: (value: string) => Promise<boolean>;
+}) {
+  const { label, value, type = "text", onCommit } = props;
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  return (
+    <input
+      aria-label={label}
+      type={type}
+      value={draft}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={() => {
+        if (draft === value) return;
+        void onCommit(draft).then((ok) => {
+          if (!ok) setDraft(value);
+        });
+      }}
+    />
+  );
+}
 
 function NameSection(props: { title: string; path: string; rows: NameRow[]; run: Run; text: Text }) {
   const { title, path, rows, run, text } = props;
@@ -73,14 +98,10 @@ function NameSection(props: { title: string; path: string; rows: NameRow[]; run:
       <ul>
         {rows.map((row) => (
           <li key={row.id}>
-            <input
-              aria-label={text("field.name")}
-              defaultValue={row.name}
-              onBlur={(event) => {
-                if (event.target.value !== row.name) {
-                  void run("PATCH", `/references/${path}/${row.id}`, { name: event.target.value });
-                }
-              }}
+            <EditableField
+              label={text("field.name")}
+              value={row.name}
+              onCommit={(name) => run("PATCH", `/references/${path}/${row.id}`, { name })}
             />
             <button type="button" onClick={() => void run("DELETE", `/references/${path}/${row.id}`)}>
               {text("action.delete")}
@@ -96,10 +117,9 @@ function NameSection(props: { title: string; path: string; rows: NameRow[]; run:
       />
       <button
         type="button"
-        onClick={() => {
-          void run("POST", `/references/${path}`, { name: draft });
-          setDraft("");
-        }}
+        onClick={() =>
+          void run("POST", `/references/${path}`, { name: draft }).then((ok) => ok && setDraft(""))
+        }
       >
         {text("action.add")}
       </button>
@@ -118,24 +138,16 @@ function RewardSection(props: { rows: Reward[]; run: Run; text: Text }) {
       <ul>
         {rows.map((row) => (
           <li key={row.id}>
-            <input
-              aria-label={text("field.name")}
-              defaultValue={row.title}
-              onBlur={(event) => {
-                if (event.target.value !== row.title) {
-                  void run("PATCH", `/references/rewards/${row.id}`, { title: event.target.value });
-                }
-              }}
+            <EditableField
+              label={text("field.name")}
+              value={row.title}
+              onCommit={(value) => run("PATCH", `/references/rewards/${row.id}`, { title: value })}
             />
-            <input
-              aria-label={text("field.minutes")}
+            <EditableField
+              label={text("field.minutes")}
               type="number"
-              defaultValue={row.minutes}
-              onBlur={(event) => {
-                if (Number(event.target.value) !== row.minutes) {
-                  void run("PATCH", `/references/rewards/${row.id}`, { minutes: Number(event.target.value) });
-                }
-              }}
+              value={String(row.minutes)}
+              onCommit={(value) => run("PATCH", `/references/rewards/${row.id}`, { minutes: Number(value) })}
             />
             <button type="button" onClick={() => void run("DELETE", `/references/rewards/${row.id}`)}>
               {text("action.delete")}
@@ -158,11 +170,15 @@ function RewardSection(props: { rows: Reward[]; run: Run; text: Text }) {
       />
       <button
         type="button"
-        onClick={() => {
-          void run("POST", "/references/rewards", minutes ? { title, minutes: Number(minutes) } : { title });
-          setTitle("");
-          setMinutes("");
-        }}
+        onClick={() =>
+          void run("POST", "/references/rewards", minutes ? { title, minutes: Number(minutes) } : { title }).then(
+            (ok) => {
+              if (!ok) return;
+              setTitle("");
+              setMinutes("");
+            },
+          )
+        }
       >
         {text("action.add")}
       </button>
@@ -206,11 +222,13 @@ function ParallelSection(props: { categories: NameRow[]; pairs: Pair[]; run: Run
       {options(second, setSecond, text("field.secondCategory"))}
       <button
         type="button"
-        onClick={() => {
-          void run("POST", "/references/compat", { a: first, b: second });
-          setFirst("");
-          setSecond("");
-        }}
+        onClick={() =>
+          void run("POST", "/references/compat", { a: first, b: second }).then((ok) => {
+            if (!ok) return;
+            setFirst("");
+            setSecond("");
+          })
+        }
       >
         {text("action.add")}
       </button>

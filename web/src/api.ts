@@ -1,6 +1,6 @@
 import { STORAGE_KEY } from "./session";
 
-export type ApiResult<T> = { ok: boolean; error?: string; data?: T };
+export type ApiResult<T> = { ok: boolean; status?: number; error?: string; data?: T };
 
 export async function api<T = unknown>(
   method: string,
@@ -17,7 +17,9 @@ export async function api<T = unknown>(
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const json = (await response.json().catch(() => ({}))) as T & { error?: string };
-    return response.ok ? { ok: true, data: json } : { ok: false, error: json.error };
+    return response.ok
+      ? { ok: true, status: response.status, data: json }
+      : { ok: false, status: response.status, error: json.error };
   } catch {
     return { ok: false };
   }
