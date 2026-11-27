@@ -26,11 +26,15 @@ const errorKeys: Record<string, TextKey> = {
 export function References({ language, onSignedOut }: Props) {
   const [lists, setLists] = useState<Lists>();
   const [error, setError] = useState<string>();
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const reload = useCallback(async () => {
     const result = await api<Lists>("GET", "/references");
     if (result.status === 401) onSignedOut();
-    if (result.data) setLists(result.data);
+    if (result.data) {
+      setLists(result.data);
+      setLoadFailed(false);
+    } else if (result.status !== 401) setLoadFailed(true);
   }, [onSignedOut]);
 
   useEffect(() => {
@@ -48,8 +52,8 @@ export function References({ language, onSignedOut }: Props) {
     [reload, onSignedOut],
   );
 
-  if (!lists) return null;
   const text: Text = (key) => t(language, key);
+  if (!lists) return loadFailed ? <p role="alert">{text("error.load")}</p> : null;
 
   return (
     <div>
@@ -81,7 +85,7 @@ function EditableField(props: {
       onBlur={() => {
         if (draft === value) return;
         void onCommit(draft).then((ok) => {
-          if (!ok) setDraft(value);
+          if (!ok) setDraft((current) => (current === draft ? value : current));
         });
       }}
     />

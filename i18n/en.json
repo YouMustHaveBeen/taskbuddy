@@ -21,8 +21,9 @@
   "field.firstCategory": "First category",
   "field.secondCategory": "Second category",
   "list.empty": "Nothing here yet.",
-  "error.duplicate": "This name already exists.",
+  "error.duplicate": "This entry already exists.",
   "error.in_use": "This value is in use and can't be deleted.",
-  "error.invalid": "The name is empty or too long.",
-  "error.generic": "Couldn't save. Try again."
+  "error.invalid": "Check the value you entered.",
+  "error.generic": "Couldn't save. Try again.",
+  "error.load": "Couldn't load. Refresh the page."
 }
