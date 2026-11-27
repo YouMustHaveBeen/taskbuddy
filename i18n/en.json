@@ -28,8 +28,6 @@
   "error.load": "Couldn't load. Refresh the page.",
   "tab.inbox": "Inbox",
   "action.new": "New entry",
-  "action.open": "Open",
-  "action.close": "Close",
   "field.important": "Important",
   "field.urgent": "Urgent",
   "field.impactful": "Impact",
@@ -51,5 +49,9 @@
   "flavor.frog": "Frog",
   "field.firstStep": "First step",
   "card.draft": "Draft. To make this a task, fill in an area and a kind; and if “Important” or “Impact” is checked, also “Why it matters”.",
-  "card.task": "This entry is now a task."
+  "card.task": "This entry is now a task.",
+  "action.confirmDelete": "Yes, delete",
+  "action.cancel": "Cancel",
+  "delete.ask": "Delete this entry?",
+  "inbox.noSpheres": "Add areas first on the “Reference lists” tab."
 }

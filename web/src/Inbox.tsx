@@ -113,11 +113,12 @@ export function Inbox({ language, onSignedOut }: Props) {
 
   return (
     <section>
-      <button type="button" aria-label={text("action.new")} onClick={() => setAdding(!adding)}>
+      <button type="button" className="add" aria-label={text("action.new")} onClick={() => setAdding(!adding)}>
         +
       </button>
       {adding && (
         <input
+          className="wide"
           aria-label={text("field.name")}
           value={newTitle}
           autoFocus
@@ -126,22 +127,20 @@ export function Inbox({ language, onSignedOut }: Props) {
           onKeyDown={(event) => event.key === "Enter" && void create()}
         />
       )}
-      {rows.length === 0 && <p>{text("list.empty")}</p>}
-      <ul>
+      {rows.length === 0 && <p className="empty">{text("list.empty")}</p>}
+      <ul className="rows">
         {rows.map((row) => (
-          <li key={row.id}>
-            {row.title}
+          <li key={row.id} className="row">
             <button
               type="button"
+              className="row-title"
+              aria-expanded={openId === row.id}
               onClick={() => {
                 if (openId === row.id) void reload();
                 setOpenId(openId === row.id ? undefined : row.id);
               }}
             >
-              {text(openId === row.id ? "action.close" : "action.open")}
-            </button>
-            <button type="button" onClick={() => void remove(row.id)}>
-              {text("action.delete")}
+              {row.title}
             </button>
             {openId === row.id && (
               <CardForm
@@ -150,6 +149,7 @@ export function Inbox({ language, onSignedOut }: Props) {
                 lists={lists}
                 projects={projects}
                 onSignedOut={onSignedOut}
+                onDelete={() => remove(row.id)}
               />
             )}
           </li>
@@ -165,8 +165,10 @@ function CardForm(props: {
   lists: Lists;
   projects: Row[];
   onSignedOut: () => void;
+  onDelete: () => Promise<void>;
 }) {
-  const { id, text, lists, projects, onSignedOut } = props;
+  const { id, text, lists, projects, onSignedOut, onDelete } = props;
+  const [confirming, setConfirming] = useState(false);
   const [card, setCard] = useState<Card>();
   const [failed, setFailed] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
@@ -197,17 +199,20 @@ function CardForm(props: {
   const projectOptions = projects.filter((project) => project.id !== id);
 
   return (
-    <div>
+    <div className="card">
       {saveFailed && <p role="alert">{text("error.generic")}</p>}
-      <p>{text(card.kind === "task" ? "card.task" : "card.draft")}</p>
-      <TextField label={text("field.name")} value={card.title} onCommit={(v) => save({ title: v })} />
-      <Check label={text("field.important")} value={card.important === true} onChange={(v) => save({ important: v })} />
-      <Check label={text("field.urgent")} value={card.urgent === true} onChange={(v) => save({ urgent: v })} />
-      <Check label={text("field.impactful")} value={card.impactful === true} onChange={(v) => save({ impactful: v })} />
-      <Check label={text("field.easy")} value={card.easy === true} onChange={(v) => save({ easy: v })} />
-      <TextField label={text("field.why")} value={card.why ?? ""} onCommit={(v) => save({ why: v })} />
-      <fieldset>
+      <p className="hint">{text(card.kind === "task" ? "card.task" : "card.draft")}</p>
+      <TextField multiline label={text("field.name")} value={card.title} onCommit={(v) => save({ title: v })} />
+      <div className="marks">
+        <Check label={text("field.important")} value={card.important === true} onChange={(v) => save({ important: v })} />
+        <Check label={text("field.urgent")} value={card.urgent === true} onChange={(v) => save({ urgent: v })} />
+        <Check label={text("field.impactful")} value={card.impactful === true} onChange={(v) => save({ impactful: v })} />
+        <Check label={text("field.easy")} value={card.easy === true} onChange={(v) => save({ easy: v })} />
+      </div>
+      <TextField multiline label={text("field.why")} value={card.why ?? ""} onCommit={(v) => save({ why: v })} />
+      <fieldset className="spheres">
         <legend>{text("field.spheres")}</legend>
+        {lists.spheres.length === 0 && <p className="empty">{text("inbox.noSpheres")}</p>}
         {lists.spheres.map((sphere) => (
           <label key={sphere.id}>
             <input
@@ -246,7 +251,7 @@ function CardForm(props: {
         <input type="date" value={dateValue(card.deferredUntil)} onChange={(e) => void save({ deferredUntil: fromDate(e.target.value) })} />
       </Labeled>
       <Check label={text("field.queued")} value={card.queued} onChange={(v) => save({ queued: v })} />
-      <TextField label={text("field.waitingFor")} value={card.waitingFor ?? ""} onCommit={(v) => save({ waitingFor: v })} />
+      <TextField multiline label={text("field.waitingFor")} value={card.waitingFor ?? ""} onCommit={(v) => save({ waitingFor: v })} />
       <Labeled label={text("field.flavor")}>
         <select value={card.flavor ?? ""} onChange={(e) => void save({ flavor: e.target.value || null })}>
           <option value="" />
@@ -254,40 +259,64 @@ function CardForm(props: {
           <option value="frog">{text("flavor.frog")}</option>
         </select>
       </Labeled>
-      <TextField label={text("field.firstStep")} value={card.firstStepText ?? ""} onCommit={(v) => save({ firstStepText: v })} />
+      <TextField multiline label={text("field.firstStep")} value={card.firstStepText ?? ""} onCommit={(v) => save({ firstStepText: v })} />
+      <div className="danger-zone">
+        {confirming ? (
+          <>
+            <span>{text("delete.ask")}</span>
+            <button type="button" className="danger" onClick={() => void onDelete()}>
+              {text("action.confirmDelete")}
+            </button>
+            <button type="button" onClick={() => setConfirming(false)}>
+              {text("action.cancel")}
+            </button>
+          </>
+        ) : (
+          <button type="button" onClick={() => setConfirming(true)}>
+            {text("action.delete")}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
 
 function Labeled(props: { label: string; children: ReactNode }) {
   return (
-    <label>
-      {props.label} {props.children}
+    <label className="field">
+      <span>{props.label}</span>
+      {props.children}
     </label>
   );
 }
 
-function TextField(props: { label: string; value: string; onCommit: (value: string) => Promise<boolean> }) {
-  const { label, value, onCommit } = props;
+function TextField(props: {
+  label: string;
+  value: string;
+  multiline?: boolean;
+  onCommit: (value: string) => Promise<boolean>;
+}) {
+  const { label, value, multiline, onCommit } = props;
   const [draft, setDraft] = useState(value);
   const editing = useRef(false);
   useEffect(() => {
     if (!editing.current) setDraft(value);
   }, [value]);
+  const fieldProps = {
+    value: draft,
+    onFocus: () => (editing.current = true),
+    onChange: (event: { target: { value: string } }) => setDraft(event.target.value),
+    onBlur: () => {
+      editing.current = false;
+      if (draft === value) return;
+      void onCommit(draft).then((ok) => {
+        if (!ok) setDraft((current) => (current === draft ? value : current));
+      });
+    },
+  };
   return (
     <Labeled label={label}>
-      <input
-        value={draft}
-        onFocus={() => (editing.current = true)}
-        onChange={(event) => setDraft(event.target.value)}
-        onBlur={() => {
-          editing.current = false;
-          if (draft === value) return;
-          void onCommit(draft).then((ok) => {
-            if (!ok) setDraft((current) => (current === draft ? value : current));
-          });
-        }}
-      />
+      {multiline ? <textarea rows={3} {...fieldProps} /> : <input {...fieldProps} />}
     </Labeled>
   );
 }
@@ -310,7 +339,7 @@ function Choice(props: { label: string; value: string | null; options: NameRow[]
 
 function Check(props: { label: string; value: boolean; onChange: (value: boolean) => Promise<boolean> }) {
   return (
-    <label>
+    <label className="check">
       <input type="checkbox" checked={props.value} onChange={(e) => void props.onChange(e.target.checked)} />
       {props.label}
     </label>
