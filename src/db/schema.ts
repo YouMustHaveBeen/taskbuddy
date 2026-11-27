@@ -196,6 +196,7 @@ export const tasks = sqliteTable(
     lastShownAt: integer("last_shown_at"),
     firstStepVoiceId: text("first_step_voice_id"),
     firstStepText: text("first_step_text"),
+    refusalNote: text("refusal_note"),
     inFocus: integer("in_focus", { mode: "boolean" }).notNull().default(false),
   },
   (t) => [
@@ -272,7 +273,7 @@ export const dayPlan = sqliteTable(
     itemId: text("item_id")
       .notNull()
       .references(() => items.id, { onDelete: "cascade" }),
-    state: text("state", { enum: ["offered", "accepted", "refused", "done", "returned"] })
+    state: text("state", { enum: ["offered", "accepted", "refused", "done", "returned", "closed"] })
       .notNull()
       .default("offered"),
     replacements: integer("replacements").notNull().default(0),

@@ -2,13 +2,14 @@ import { StrictMode, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { pickLanguage, t, type Language } from "../../i18n";
 import { Inbox } from "./Inbox";
+import { Today } from "./Today";
 import { References } from "./References";
 import { Tasks } from "./Tasks";
 import { forgetSession, signIn, type PageUser } from "./session";
 
 function App() {
   const [state, setState] = useState<{ user?: PageUser } | undefined>();
-  const [tab, setTab] = useState<"inbox" | "tasks" | "references">("inbox");
+  const [tab, setTab] = useState<"now" | "today" | "inbox" | "tasks" | "references">("now");
 
   useEffect(() => {
     signIn()
@@ -28,7 +29,7 @@ function App() {
     <>
       <p>{t(language, "web.signedIn", { name: state.user.name })}</p>
       <nav>
-        {(["inbox", "tasks", "references"] as const).map((name) => (
+        {(["now", "today", "inbox", "tasks", "references"] as const).map((name) => (
           <button
             key={name}
             type="button"
@@ -39,6 +40,8 @@ function App() {
           </button>
         ))}
       </nav>
+      {tab === "now" && <Today language={language} onSignedOut={signedOut} ring />}
+      {tab === "today" && <Today language={language} onSignedOut={signedOut} ring={false} />}
       {tab === "inbox" && <Inbox language={language} onSignedOut={signedOut} />}
       {tab === "tasks" && <Tasks language={language} onSignedOut={signedOut} />}
       {tab === "references" && <References language={language} onSignedOut={signedOut} />}

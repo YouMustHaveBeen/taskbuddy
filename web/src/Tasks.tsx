@@ -56,7 +56,8 @@ type Filters = {
   field: FieldKey | "";
   notFilled: boolean;
 };
-type Props = { language: Language; onSignedOut: () => void };
+/** `onPick`: режим «Выбрать» (вкладки «Сейчас» и «Сегодня»): у каждой задачи кнопка «Взять», по умолчанию только «Можно сейчас». */
+type Props = { language: Language; onSignedOut: () => void; onPick?: (id: string) => Promise<void> };
 
 const marks: Mark[] = ["important", "urgent", "impactful", "easy"];
 const markLabels: Record<Mark, TextKey> = {
@@ -155,14 +156,14 @@ function matches(task: TaskRow, f: Filters): boolean {
   );
 }
 
-export function Tasks({ language, onSignedOut }: Props) {
+export function Tasks({ language, onSignedOut, onPick }: Props) {
   const text: Text = (key) => t(language, key);
   const [tasks, setTasks] = useState<TaskRow[]>();
   const [lists, setLists] = useState<Lists>();
   const [projects, setProjects] = useState<Row[]>([]);
   const [failed, setFailed] = useState(false);
   const [openId, setOpenId] = useState<string>();
-  const [filters, setFilters] = useState<Filters>(noFilters);
+  const [filters, setFilters] = useState<Filters>({ ...noFilters, status: onPick ? "now" : "" });
   const [sortBy, setSortBy] = useState<SortKey>("priority");
   const [thenBy, setThenBy] = useState<SortKey | "">("deadline");
 
@@ -302,6 +303,11 @@ export function Tasks({ language, onSignedOut }: Props) {
               <span className={`level level-${task.level}`}>{text(levelLabels[task.level])}</span>
               {task.ownerName !== null && <span className="owner">{t(language, "task.owner", { name: task.ownerName })}</span>}
             </button>
+            {onPick && (
+              <button type="button" onClick={() => void onPick(task.id)}>
+                {text("action.take")}
+              </button>
+            )}
             {openId === task.id && (
               <CardForm
                 id={task.id}

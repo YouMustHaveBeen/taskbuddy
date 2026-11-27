@@ -21,8 +21,8 @@
         font: 16px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
       }
       p { margin: 8px 0; }
-      nav { display: flex; gap: 8px; margin: 12px 0 16px; }
-      nav button { flex: 1; }
+      nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 16px; }
+      nav button { flex: 1 1 auto; }
       button {
         font: inherit;
         padding: 10px 14px;
@@ -65,6 +65,22 @@
       .row-title .level-top, .row-title .level-high { opacity: 1; color: var(--accent); font-weight: 600; }
       .row-title .owner, .card .owner { font-size: 13px; opacity: 0.7; }
       .row-title .owner { display: block; }
+      .block { margin: 16px 0; }
+      .block h2 { font-size: 17px; margin: 0 0 8px; }
+      .ring { margin: 8px auto 16px; text-align: center; }
+      .ring figcaption { font-size: 14px; opacity: 0.7; }
+      .slots { display: grid; gap: 8px; }
+      .slot-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--soft); }
+      .slot-name { display: block; font-size: 13px; opacity: 0.7; }
+      .slot-task .meta, .today-row .meta { font-size: 13px; opacity: 0.7; margin-left: 8px; }
+      .slot-card textarea { width: 100%; min-height: 72px; font: inherit; }
+      .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+      .actions button { flex: 1; }
+      .actions button.primary { width: auto; margin-top: 0; }
+      .today-row > span { flex: 1; min-width: 0; }
+      .today-row > button { flex: none; }
+      .rows .today-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; }
+      .today-row .done { text-decoration: line-through; opacity: 0.6; }
       .field { display: block; margin: 12px 0; }
       .field > span { display: block; font-size: 14px; opacity: 0.7; margin-bottom: 4px; }
       .marks { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 12px 0; }
