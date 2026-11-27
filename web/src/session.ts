@@ -2,7 +2,7 @@ import { retrieveRawInitData } from "@telegram-apps/sdk";
 
 export type PageUser = { name: string; language: string };
 
-const STORAGE_KEY = "taskbuddy.session";
+export const STORAGE_KEY = "taskbuddy.session";
 
 function telegramInitData(): string | undefined {
   try {

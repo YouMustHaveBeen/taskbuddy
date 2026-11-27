@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "81086454-20d1-46fb-902a-5624e0e87932",
+  "id": "9cbbd031-8c57-4bb5-b832-67f97232eaa9",
   "prevId": "2cd8f9fa-694c-438a-919e-add92846ad98",
   "tables": {
     "action_kinds": {
@@ -571,15 +571,15 @@
           "notNull": false,
           "autoincrement": false
         },
-        "total_goal": {
-          "name": "total_goal",
+        "goal_total": {
+          "name": "goal_total",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "min_amount": {
-          "name": "min_amount",
+        "min_value": {
+          "name": "min_value",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,

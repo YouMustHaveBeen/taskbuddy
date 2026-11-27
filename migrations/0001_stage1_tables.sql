@@ -73,8 +73,8 @@ CREATE INDEX `items_archived_at` ON `items` (`archived_at`);--> statement-breakp
 CREATE TABLE `practices` (
 	`id` text PRIMARY KEY NOT NULL,
 	`unit` text,
-	`total_goal` integer,
-	`min_amount` integer,
+	`goal_total` integer,
+	`min_value` integer,
 	`min_period` text,
 	FOREIGN KEY (`id`) REFERENCES `items`(`id`) ON UPDATE no action ON DELETE cascade
 );

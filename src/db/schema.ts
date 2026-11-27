@@ -221,8 +221,8 @@ export const practices = sqliteTable("practices", {
     .primaryKey()
     .references(() => items.id, { onDelete: "cascade" }),
   unit: text("unit"),
-  totalGoal: integer("total_goal"),
-  minAmount: integer("min_amount"),
+  goalTotal: integer("goal_total"),
+  minValue: integer("min_value"),
   minPeriod: text("min_period", { enum: ["day", "week", "month"] }),
 });
 
