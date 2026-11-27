@@ -39,7 +39,6 @@
   "field.deadline": "Deadline",
   "field.remindAt": "Remind me",
   "field.project": "Project",
-  "field.isProject": "This is a project",
   "field.deferred": "Postponed",
   "field.deferredUntil": "Postponed until",
   "field.queued": "In the queue",
@@ -52,6 +51,8 @@
   "action.cancel": "Cancel",
   "delete.ask": "Delete this entry?",
   "inbox.noSpheres": "Add areas first on the “Reference lists” tab.",
-  "action.addTask": "Add task",
-  "card.missing": "To add the task, fill in:"
+  "card.missing": "To add this, fill in:",
+  "field.type": "What is this?",
+  "type.task": "Task",
+  "type.project": "Project"
 }

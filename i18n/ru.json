@@ -41,7 +41,6 @@
   "field.deadline": "Дедлайн",
   "field.remindAt": "Напомнить",
   "field.project": "Проект",
-  "field.isProject": "Это проект",
   "field.deferred": "Отложено",
   "field.deferredUntil": "Отложено до",
   "field.queued": "В очереди",
@@ -54,6 +53,8 @@
   "action.cancel": "Отмена",
   "delete.ask": "Удалить запись?",
   "inbox.noSpheres": "Сначала добавь сферы на вкладке «Справочники».",
-  "action.addTask": "Добавить задачу",
-  "card.missing": "Чтобы добавить задачу, заполни:"
+  "card.missing": "Чтобы добавить, заполни:",
+  "field.type": "Что это?",
+  "type.task": "Задача",
+  "type.project": "Проект"
 }

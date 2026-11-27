@@ -68,7 +68,6 @@ export function parsePatch(raw: unknown): Parsed | undefined {
     deadline: moment,
     remindAt: moment,
     deferredUntil: moment,
-    isProject: flag,
     deferred: flag,
     queued: flag,
     waitingFor: (value) => text(value, max),
@@ -151,10 +150,12 @@ export const items = {
     return { outcome: "ok", card: view(await saveCard(db, itemId, write, now)) };
   },
 
-  /** Кнопка «Добавить задачу»: запись уходит из инбокса, если заполнены обязательные поля. */
-  async promote(db: Db, userId: string, itemId: string, now: number): Promise<{ outcome: ItemOutcome; card?: CardView }> {
-    const card = await promoteCard(db, userId, itemId, now);
+  /** Кнопка «Добавить»: запись уходит из инбокса как задача или проект, если заполнены обязательные поля. */
+  async promote(db: Db, userId: string, itemId: string, rawType: unknown, now: number): Promise<{ outcome: ItemOutcome; card?: CardView }> {
+    if (rawType !== "task" && rawType !== "project") return { outcome: "invalid" };
+    const card = await promoteCard(db, userId, itemId, rawType === "project", now);
     if (!card) return { outcome: "not_found" };
+    if (card === "other_kind") return { outcome: "invalid" };
     if (card.kind === "task") return { outcome: "ok", card: view(card) };
     return { outcome: card.kind === "inbox" ? "incomplete" : "invalid" };
   },

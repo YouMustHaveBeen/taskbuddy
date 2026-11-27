@@ -6,7 +6,8 @@ import { api } from "./api";
 type Row = { id: string; title: string };
 type NameRow = { id: string; name: string };
 type Lists = { spheres: NameRow[]; actionKinds: NameRow[]; categories: NameRow[] };
-const missingLabels: Record<string, "field.why" | "field.spheres" | "field.kind"> = {
+const missingLabels: Record<string, "field.type" | "field.why" | "field.spheres" | "field.kind"> = {
+  type: "field.type",
   why: "field.why",
   spheres: "field.spheres",
   kind: "field.kind",
@@ -185,6 +186,7 @@ function CardForm(props: {
   const [card, setCard] = useState<Card>();
   const [failed, setFailed] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
+  const [type, setType] = useState<"task" | "project" | "">("");
   const [spheres, setSpheres] = useState<string[]>([]);
   const latestSpheres = useRef<string[]>([]);
 
@@ -209,7 +211,8 @@ function CardForm(props: {
   };
 
   const promote = async () => {
-    const result = await api<{ card: Card }>("POST", `/items/${id}/promote`);
+    if (!type) return;
+    const result = await api<{ card: Card }>("POST", `/items/${id}/promote`, { type });
     if (result.status === 401) onSignedOut();
     if (result.data) await onPromoted();
     else if (result.status === 409) await save({});
@@ -222,11 +225,18 @@ function CardForm(props: {
   return (
     <div className="card">
       {saveFailed && <p role="alert">{text("error.generic")}</p>}
-      {card.missing.length > 0 && (
+      {(!type || card.missing.length > 0) && (
         <p className="hint">
-          {text("card.missing")} {card.missing.map((field) => text(missingLabels[field] ?? "field.name").toLowerCase()).join(", ")}
+          {text("card.missing")} {[...(type ? [] : ["type"]), ...card.missing].map((field) => text(missingLabels[field]).toLowerCase().replace(/\?$/, "")).join(", ")}
         </p>
       )}
+      <Labeled label={text("field.type")}>
+        <select value={type} onChange={(e) => setType(e.target.value as "task" | "project" | "")}>
+          <option value="" />
+          <option value="task">{text("type.task")}</option>
+          <option value="project">{text("type.project")}</option>
+        </select>
+      </Labeled>
       <TextField multiline label={text("field.name")} value={card.title} onCommit={(v) => save({ title: v })} />
       <div className="marks">
         <Check label={text("field.important")} value={card.important === true} onChange={(v) => save({ important: v })} />
@@ -270,7 +280,6 @@ function CardForm(props: {
         <input type="datetime-local" value={dateTimeValue(card.remindAt)} onChange={(e) => void save({ remindAt: fromDateTime(e.target.value) })} />
       </Labeled>
       <Choice label={text("field.project")} value={card.projectId} options={projectOptions.map((p) => ({ id: p.id, name: p.title }))} onChange={(v) => save({ projectId: v })} />
-      <Check label={text("field.isProject")} value={card.isProject} onChange={(v) => save({ isProject: v })} />
       <Check label={text("field.deferred")} value={card.deferred} onChange={(v) => save({ deferred: v })} />
       <Labeled label={text("field.deferredUntil")}>
         <input type="date" value={dateValue(card.deferredUntil)} onChange={(e) => void save({ deferredUntil: fromDate(e.target.value) })} />
@@ -285,8 +294,8 @@ function CardForm(props: {
         </select>
       </Labeled>
       <TextField multiline label={text("field.firstStep")} value={card.firstStepText ?? ""} onCommit={(v) => save({ firstStepText: v })} />
-      <button type="button" className="primary" disabled={card.missing.length > 0} onClick={() => void promote()}>
-        {text("action.addTask")}
+      <button type="button" className="primary" disabled={!type || card.missing.length > 0} onClick={() => void promote()}>
+        {text("action.add")}
       </button>
       <div className="danger-zone">
         {confirming ? (

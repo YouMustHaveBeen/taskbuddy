@@ -35,7 +35,13 @@ itemRoutes.patch("/items/:id", requireUser, async (c) => {
 });
 
 itemRoutes.post("/items/:id/promote", requireUser, async (c) => {
-  const { outcome, card } = await items.promote(c.var.db, c.var.user.id, c.req.param("id"), Date.now());
+  const { outcome, card } = await items.promote(
+    c.var.db,
+    c.var.user.id,
+    c.req.param("id"),
+    ((await jsonBody(c)) as { type?: unknown } | undefined)?.type,
+    Date.now(),
+  );
   return reply(c, outcome, { card });
 });
 

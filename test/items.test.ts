@@ -42,8 +42,8 @@ async function save(token: string, id: string, patch: unknown): Promise<{ status
   return { status: response.status, card: response.status === 200 ? (await response.json<{ card: CardView }>()).card : undefined };
 }
 
-async function promote(token: string, id: string): Promise<{ status: number; card?: CardView }> {
-  const response = await api(token, "POST", `/items/${id}/promote`);
+async function promote(token: string, id: string, type: unknown = "task"): Promise<{ status: number; card?: CardView }> {
+  const response = await api(token, "POST", `/items/${id}/promote`, { type });
   return { status: response.status, card: response.status === 200 ? (await response.json<{ card: CardView }>()).card : undefined };
 }
 
@@ -143,8 +143,38 @@ describe("карточка: черновик и задача", () => {
     expect((await promote(ann.token, id)).status).toBe(409);
     expect(await inboxTitles(ann.token)).toEqual(["купить хлеб"]);
     expect((await promote(bob.token, id)).status).toBe(404);
-    const strays = await env.DB.prepare("SELECT count(*) AS n FROM tasks WHERE id = ?").bind(id).first<{ n: number }>();
-    expect(strays?.n).toBe(1);
+  });
+
+  it("чужая запись без строки задачи: отказ и никаких побочных строк", async () => {
+    const id = await newItem(ann.token);
+    const rowsBefore = await env.DB.prepare("SELECT count(*) AS n FROM tasks WHERE id = ?").bind(id).first<{ n: number }>();
+    expect(rowsBefore?.n).toBe(0);
+    expect((await promote(bob.token, id)).status).toBe(404);
+    const rowsAfter = await env.DB.prepare("SELECT count(*) AS n FROM tasks WHERE id = ?").bind(id).first<{ n: number }>();
+    expect(rowsAfter?.n).toBe(0);
+  });
+
+  it("запись другого вида не получает строку задачи", async () => {
+    const id = await newItem(ann.token);
+    await env.DB.prepare("UPDATE items SET kind = 'idea' WHERE id = ?").bind(id).run();
+    expect((await promote(ann.token, id)).status).toBe(400);
+    const rows = await env.DB.prepare("SELECT count(*) AS n FROM tasks WHERE id = ?").bind(id).first<{ n: number }>();
+    expect(rows?.n).toBe(0);
+  });
+
+  it("тип «Проект» делает запись проектом, «Задача» нет; неизвестный тип отклоняется", async () => {
+    const sphere = await addRef(ann.token, "spheres", "дом");
+    const kind = await addRef(ann.token, "action-kinds", "купить");
+    const project = await newItem(ann.token, "ремонт кухни");
+    const task = await newItem(ann.token, "купить краску");
+    for (const id of [project, task]) await save(ann.token, id, { sphereIds: [sphere], actionKindId: kind });
+    expect((await promote(ann.token, project, "idea")).status).toBe(400);
+    expect((await promote(ann.token, project, null)).status).toBe(400);
+    expect((await promote(ann.token, project, "project")).card?.kind).toBe("task");
+    expect((await promote(ann.token, task, "task")).card?.kind).toBe("task");
+    const list = await (await api(ann.token, "GET", "/projects")).json<{ projects: { id: string }[] }>();
+    expect(list.projects.map((row) => row.id)).toEqual([project]);
+    expect((await save(ann.token, task, { isProject: true })).status).toBe(400);
   });
 
   it("архивную запись добавить задачей нельзя", async () => {
@@ -199,8 +229,8 @@ describe("карточка: черновик и задача", () => {
     const foreignProject = await newItem(bob.token, "чужой проект");
     const bobSphere = await addRef(bob.token, "spheres", "семья");
     const bobKind = await addRef(bob.token, "action-kinds", "сделать");
-    await save(bob.token, foreignProject, { ...marks, sphereIds: [bobSphere], actionKindId: bobKind, isProject: true });
-    expect((await promote(bob.token, foreignProject)).card?.kind).toBe("task");
+    await save(bob.token, foreignProject, { ...marks, sphereIds: [bobSphere], actionKindId: bobKind });
+    expect((await promote(bob.token, foreignProject, "project")).card?.kind).toBe("task");
     expect((await save(ann.token, id, { projectId: foreignProject })).status).toBe(400);
     expect((await save(ann.token, id, { projectId: crypto.randomUUID() })).status).toBe(400);
     const card = (await (await api(ann.token, "GET", `/items/${id}`)).json<{ card: CardView }>()).card;
@@ -213,8 +243,8 @@ describe("карточка: черновик и задача", () => {
     const project = await newItem(ann.token, "ремонт кухни");
     const step = await newItem(ann.token, "купить краску");
     expect((await save(ann.token, step, { projectId: project })).status).toBe(400);
-    await save(ann.token, project, { ...marks, sphereIds: [sphere], actionKindId: kind, isProject: true });
-    await promote(ann.token, project);
+    await save(ann.token, project, { ...marks, sphereIds: [sphere], actionKindId: kind });
+    await promote(ann.token, project, "project");
     expect((await save(ann.token, step, { projectId: project })).status).toBe(200);
     expect((await save(ann.token, project, { projectId: project })).status).toBe(400);
     const list = await (await api(ann.token, "GET", "/projects")).json<{ projects: { id: string }[] }>();
