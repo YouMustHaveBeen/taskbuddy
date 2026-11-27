@@ -2,7 +2,7 @@ import { retrieveRawInitData } from "@telegram-apps/sdk";
 
 export type PageUser = { name: string; language: string };
 
-const STORAGE_KEY = "taskbuddy.session";
+export const STORAGE_KEY = "taskbuddy.session";
 
 function telegramInitData(): string | undefined {
   try {
@@ -22,6 +22,14 @@ async function post(path: string, body: unknown): Promise<PageUser | undefined> 
   const result = (await response.json()) as { token: string; user: PageUser };
   localStorage.setItem(STORAGE_KEY, result.token);
   return result.user;
+}
+
+export function forgetSession(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // storage unavailable
+  }
 }
 
 export async function signIn(): Promise<PageUser | undefined> {
