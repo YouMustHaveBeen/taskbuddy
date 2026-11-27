@@ -42,7 +42,7 @@ async function save(token: string, id: string, patch: unknown): Promise<{ status
   return { status: response.status, card: response.status === 200 ? (await response.json<{ card: CardView }>()).card : undefined };
 }
 
-async function promote(token: string, id: string, type: unknown = "task"): Promise<{ status: number; card?: CardView }> {
+async function promote(token: string, id: string, type: unknown): Promise<{ status: number; card?: CardView }> {
   const response = await api(token, "POST", `/items/${id}/promote`, { type });
   return { status: response.status, card: response.status === 200 ? (await response.json<{ card: CardView }>()).card : undefined };
 }
@@ -131,25 +131,25 @@ describe("карточка: черновик и задача", () => {
     expect(filled.card?.kind).toBe("inbox");
     expect(filled.card?.missing).toEqual([]);
     expect(await inboxTitles(ann.token)).toEqual(["купить хлеб"]);
-    const done = await promote(ann.token, id);
+    const done = await promote(ann.token, id, "task");
     expect(done.card?.kind).toBe("task");
     expect(await inboxTitles(ann.token)).toEqual([]);
   });
 
   it("кнопка не срабатывает, пока не заполнены обязательные поля", async () => {
     const id = await newItem(ann.token);
-    expect((await promote(ann.token, id)).status).toBe(409);
+    expect((await promote(ann.token, id, "task")).status).toBe(409);
     await save(ann.token, id, marks);
-    expect((await promote(ann.token, id)).status).toBe(409);
+    expect((await promote(ann.token, id, "task")).status).toBe(409);
     expect(await inboxTitles(ann.token)).toEqual(["купить хлеб"]);
-    expect((await promote(bob.token, id)).status).toBe(404);
+    expect((await promote(bob.token, id, "task")).status).toBe(404);
   });
 
   it("чужая запись без строки задачи: отказ и никаких побочных строк", async () => {
     const id = await newItem(ann.token);
     const rowsBefore = await env.DB.prepare("SELECT count(*) AS n FROM tasks WHERE id = ?").bind(id).first<{ n: number }>();
     expect(rowsBefore?.n).toBe(0);
-    expect((await promote(bob.token, id)).status).toBe(404);
+    expect((await promote(bob.token, id, "task")).status).toBe(404);
     const rowsAfter = await env.DB.prepare("SELECT count(*) AS n FROM tasks WHERE id = ?").bind(id).first<{ n: number }>();
     expect(rowsAfter?.n).toBe(0);
   });
@@ -157,7 +157,7 @@ describe("карточка: черновик и задача", () => {
   it("запись другого вида не получает строку задачи", async () => {
     const id = await newItem(ann.token);
     await env.DB.prepare("UPDATE items SET kind = 'idea' WHERE id = ?").bind(id).run();
-    expect((await promote(ann.token, id)).status).toBe(400);
+    expect((await promote(ann.token, id, "task")).status).toBe(400);
     const rows = await env.DB.prepare("SELECT count(*) AS n FROM tasks WHERE id = ?").bind(id).first<{ n: number }>();
     expect(rows?.n).toBe(0);
   });
@@ -177,13 +177,19 @@ describe("карточка: черновик и задача", () => {
     expect((await save(ann.token, task, { isProject: true })).status).toBe(400);
   });
 
+  it("запрос без типа и без тела получает 400", async () => {
+    const id = await newItem(ann.token);
+    expect((await api(ann.token, "POST", `/items/${id}/promote`)).status).toBe(400);
+    expect((await api(ann.token, "POST", `/items/${id}/promote`, {})).status).toBe(400);
+  });
+
   it("архивную запись добавить задачей нельзя", async () => {
     const id = await newItem(ann.token);
     const sphere = await addRef(ann.token, "spheres", "дом");
     const kind = await addRef(ann.token, "action-kinds", "купить");
     await save(ann.token, id, { sphereIds: [sphere], actionKindId: kind });
     await api(ann.token, "DELETE", `/items/${id}`);
-    expect((await promote(ann.token, id)).status).toBe(404);
+    expect((await promote(ann.token, id, "task")).status).toBe(404);
   });
 
   it("метки приоритета не обязательны: без галочек запись тоже можно добавить задачей", async () => {
@@ -192,7 +198,7 @@ describe("карточка: черновик и задача", () => {
     const kind = await addRef(ann.token, "action-kinds", "купить");
     const filled = await save(ann.token, id, { sphereIds: [sphere], actionKindId: kind });
     expect(filled.card?.missing).toEqual([]);
-    expect((await promote(ann.token, id)).card?.kind).toBe("task");
+    expect((await promote(ann.token, id, "task")).card?.kind).toBe("task");
   });
 
   it("если важно или есть эффект, нужна фраза «зачем»", async () => {
@@ -201,10 +207,10 @@ describe("карточка: черновик и задача", () => {
     const kind = await addRef(ann.token, "action-kinds", "купить");
     const first = await save(ann.token, id, { ...marks, important: true, sphereIds: [sphere], actionKindId: kind });
     expect(first.card?.missing).toEqual(["why"]);
-    expect((await promote(ann.token, id)).status).toBe(409);
+    expect((await promote(ann.token, id, "task")).status).toBe(409);
     const second = await save(ann.token, id, { why: "  чтобы был завтрак  " });
     expect(second.card?.why).toBe("чтобы был завтрак");
-    expect((await promote(ann.token, id)).card?.kind).toBe("task");
+    expect((await promote(ann.token, id, "task")).card?.kind).toBe("task");
   });
 
   it("повторное нажатие кнопки безопасно, а очистка поля у задачи ее не возвращает в инбокс", async () => {
@@ -212,7 +218,7 @@ describe("карточка: черновик и задача", () => {
     const sphere = await addRef(ann.token, "spheres", "дом");
     const kind = await addRef(ann.token, "action-kinds", "купить");
     await save(ann.token, id, { ...marks, sphereIds: [sphere], actionKindId: kind });
-    await Promise.all([promote(ann.token, id), promote(ann.token, id)]);
+    await Promise.all([promote(ann.token, id, "task"), promote(ann.token, id, "task")]);
     const back = await save(ann.token, id, { sphereIds: [] });
     expect(back.card?.kind).toBe("task");
     expect(await inboxTitles(ann.token)).toEqual([]);
