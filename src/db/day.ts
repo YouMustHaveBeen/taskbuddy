@@ -260,7 +260,7 @@ export function finishRefusal(
   return write(db, key, statements);
 }
 
-/** «Выбрать»: выбранная вручную задача сразу принята; одна и та же задача два раза за день в плане не бывает. */
+/** «Выбрать»: выбранная вручную задача сразу принята; задача, которая сегодня уже в плане (в любом состоянии), не вставляется (индекс day_plan_item). */
 export function addPickedRow(db: Db, userId: string, date: string, itemId: string, now: number): Promise<PlanWrite> {
   const d1 = db.$client;
   return write(db, { userId, date }, [
@@ -271,7 +271,8 @@ export function addPickedRow(db: Db, userId: string, date: string, itemId: strin
           (SELECT COALESCE(MAX(position) + 1, 0) FROM day_plan WHERE user_id = ?1 AND date = ?2 AND slot = 'picked'),
           i.id, 'accepted', 0, ?3
         FROM items i JOIN tasks t ON t.id = i.id
-        WHERE i.id = ?4 AND i.owner_id = ?1 AND i.kind = 'task' AND i.archived_at IS NULL AND t.is_project = 0`,
+        WHERE i.id = ?4 AND i.owner_id = ?1 AND i.kind = 'task' AND i.archived_at IS NULL AND t.is_project = 0
+          AND NOT EXISTS (SELECT 1 FROM day_plan WHERE item_id = ?4 AND user_id = ?1 AND date = ?2)`,
       )
       .bind(userId, date, now, itemId),
     d1.prepare("UPDATE tasks SET last_shown_at = ? WHERE changes() > 0 AND id = ?").bind(now, itemId),

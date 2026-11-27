@@ -326,14 +326,18 @@ export const day = {
     }
   },
 
-  /** «Выбрать»: задача, выбранная пользователем вручную, попадает в план принятой. */
+  /** «Выбрать»: задача, выбранная пользователем вручную, попадает в план принятой. QUERY BUDGET EXCEPTION: при пустом плане он сначала составляется (до 4 запросов). */
   async pick(db: Db, user: DayUser, now: number, itemId: unknown): Promise<DayResult> {
     if (typeof itemId !== "string" || itemId === "") return { outcome: "invalid" };
     const date = localDate(now, user.timezone);
-    const plan = await loadPlan(db, user.id, date);
-    if (plan.length === 0) return { outcome: "not_found" };
-    const inPlay = plan.some((row) => row.itemId === itemId && ["offered", "accepted", "done"].includes(row.state));
-    if (inPlay) return { outcome: "invalid" };
+    // пустой план: сначала составляется план дня, чтобы выбранная задача не помешала заполнить кнопки
+    let plan = await loadPlan(db, user.id, date);
+    if (plan.length === 0) {
+      await day.today(db, user, now);
+      plan = await loadPlan(db, user.id, date);
+    }
+    // задача, которая сегодня уже была в плане (в любом состоянии, в том числе после отказа), второй раз не берется
+    if (plan.some((row) => row.itemId === itemId)) return { outcome: "invalid" };
     const written = await addPickedRow(db, user.id, date, itemId, now);
     return written.changed > 0 ? { outcome: "ok", today: view(date, written.plan, now) } : { outcome: "not_found" };
   },

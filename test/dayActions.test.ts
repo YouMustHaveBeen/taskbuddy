@@ -226,9 +226,23 @@ describe("«Выбрать» и дедлайны", () => {
     expect((await api(ann.token, "POST", "/today/pick", { itemId: "" })).status).toBe(400);
     expect((await api(ann.token, "POST", "/today/pick", {})).status).toBe(400);
 
+    // задачу, от которой сегодня отказались, второй раз взять нельзя
+    const firstButton = (await today()).buttons.important;
+    await act("important", 0, "reveal");
+    await act("important", 0, "refuse");
+    expect((await api(ann.token, "POST", "/today/pick", { itemId: firstButton!.itemId })).status).toBe(400);
+
     const done = await act("picked", 0, "done");
     expect(done.today).toMatchObject({ done: 1, picked: [{ state: "done" }] });
     expect(mine).toBeDefined();
+  });
+
+  it("при пустом плане «Выбрать» работает, и план дня составляется", async () => {
+    const paused = await insertTask(ann.id, "на паузе", { waiting_for: "ответ" });
+    expect(await today()).toMatchObject({ deadlines: [], buttons: {}, picked: [] });
+    const response = await api(ann.token, "POST", "/today/pick", { itemId: paused });
+    expect(response.status).toBe(200);
+    expect((await response.json<Today>()).picked).toMatchObject([{ itemId: paused, state: "accepted" }]);
   });
 
   it("задача блока дедлайнов отмечается «Сделано» без принятия", async () => {
