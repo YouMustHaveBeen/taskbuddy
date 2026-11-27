@@ -22,6 +22,10 @@ itemRoutes.post("/inbox", requireUser, async (c) => {
   return reply(c, outcome, { id });
 });
 
+itemRoutes.get("/tasks", requireUser, async (c) =>
+  c.json({ tasks: await items.listTasks(c.var.db, c.var.user.id, Date.now()) }),
+);
+
 itemRoutes.get("/projects", requireUser, async (c) => c.json({ projects: await items.listProjects(c.var.db, c.var.user.id) }));
 
 itemRoutes.get("/items/:id", requireUser, async (c) => {

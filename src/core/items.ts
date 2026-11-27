@@ -5,6 +5,7 @@ import {
   createInbox,
   listInbox,
   listProjects,
+  listTasks,
   loadCard,
   referencesBelongTo,
   saveCard,
@@ -14,6 +15,7 @@ import {
   type InboxRow,
   type TaskFields,
 } from "../db/items";
+import { priority, priorityLevel, taskStatus } from "./day";
 import { defaults } from "./settings";
 
 export type { Card, InboxRow };
@@ -119,6 +121,14 @@ export const items = {
 
   listInbox,
   listProjects,
+
+  /** Все задачи пользователя для вкладки «Задачи»: с баллами, уровнем приоритета и статусом. */
+  async listTasks(db: Db, userId: string, now: number) {
+    return (await listTasks(db, userId)).map((task) => {
+      const points = priority(task);
+      return { ...task, priority: points, level: priorityLevel(points), status: taskStatus(task, now) };
+    });
+  },
 
   async get(db: Db, userId: string, itemId: string): Promise<CardView | undefined> {
     const card = await loadCard(db, userId, itemId);

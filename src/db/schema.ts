@@ -259,3 +259,25 @@ export const insightSpheres = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.insightId, t.sphereId] })],
 );
+
+export const dayPlan = sqliteTable(
+  "day_plan",
+  {
+    userId: userRef(),
+    date: text("date").notNull(),
+    slot: text("slot", {
+      enum: ["deadline", "important", "urgent", "impactful", "easy", "picked", "extra", "think", "review", "reward"],
+    }).notNull(),
+    position: integer("position").notNull(),
+    itemId: text("item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    state: text("state", { enum: ["offered", "accepted", "refused", "done", "returned"] })
+      .notNull()
+      .default("offered"),
+    replacements: integer("replacements").notNull().default(0),
+    hidden: integer("hidden", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.date, t.slot, t.position] }), index("day_plan_item").on(t.itemId)],
+);

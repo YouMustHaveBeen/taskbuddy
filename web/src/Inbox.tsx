@@ -3,9 +3,9 @@ import { t, type Language, type TextKey } from "../../i18n";
 import { defaults } from "../../src/core/settings";
 import { api } from "./api";
 
-type Row = { id: string; title: string };
-type NameRow = { id: string; name: string };
-type Lists = { spheres: NameRow[]; actionKinds: NameRow[]; categories: NameRow[] };
+export type Row = { id: string; title: string };
+export type NameRow = { id: string; name: string };
+export type Lists = { spheres: NameRow[]; actionKinds: NameRow[]; categories: NameRow[] };
 const missingLabels: Record<string, "field.type" | "field.why" | "field.spheres" | "field.kind"> = {
   type: "field.type",
   why: "field.why",
@@ -38,7 +38,7 @@ type Card = {
   firstStepText: string | null;
 };
 type Save = (patch: Record<string, unknown>) => Promise<boolean>;
-type Text = (key: TextKey) => string;
+export type Text = (key: TextKey) => string;
 type Props = { language: Language; onSignedOut: () => void };
 
 const two = (n: number) => String(n).padStart(2, "0");
@@ -172,16 +172,20 @@ export function Inbox({ language, onSignedOut }: Props) {
   );
 }
 
-function CardForm(props: {
+export function CardForm(props: {
   id: string;
   text: Text;
   lists: Lists;
   projects: Row[];
+  /** Пометка чужой задачи («Чья задача: имя»). У чужой задачи скрыты сферы, вид, категория и проект: справочники
+   *  у автора свои, а сервер проверяет выбор по справочникам хозяина задачи (до этапа 7). */
+  ownerLabel?: string;
   onSignedOut: () => void;
   onDelete: () => Promise<void>;
-  onPromoted: () => Promise<void>;
+  onPromoted?: () => Promise<void>;
 }) {
-  const { id, text, lists, projects, onSignedOut, onDelete, onPromoted } = props;
+  const { id, text, lists, projects, ownerLabel, onSignedOut, onDelete, onPromoted } = props;
+  const own = ownerLabel === undefined;
   const [confirming, setConfirming] = useState(false);
   const [card, setCard] = useState<Card>();
   const [failed, setFailed] = useState(false);
@@ -214,7 +218,7 @@ function CardForm(props: {
     if (!type) return;
     const result = await api<{ card: Card }>("POST", `/items/${id}/promote`, { type });
     if (result.status === 401) onSignedOut();
-    if (result.data) await onPromoted();
+    if (result.data) await onPromoted?.();
     else if (result.status === 409) await save({});
     else setSaveFailed(true);
   };
@@ -222,21 +226,25 @@ function CardForm(props: {
   if (!card) return failed ? <p role="alert">{text("error.load")}</p> : null;
   const projectOptions = projects.filter((project) => project.id !== id);
 
+  const inbox = card.kind === "inbox";
   return (
     <div className="card">
+      {!own && <p className="owner">{ownerLabel}</p>}
       {saveFailed && <p role="alert">{text("error.generic")}</p>}
-      {(!type || card.missing.length > 0) && (
+      {inbox && (!type || card.missing.length > 0) && (
         <p className="hint">
           {text("card.missing")} {[...(type ? [] : ["type"]), ...card.missing].map((field) => text(missingLabels[field]).toLowerCase().replace(/\?$/, "")).join(", ")}
         </p>
       )}
-      <Labeled label={text("field.type")}>
-        <select value={type} onChange={(e) => setType(e.target.value as "task" | "project" | "")}>
-          <option value="" />
-          <option value="task">{text("type.task")}</option>
-          <option value="project">{text("type.project")}</option>
-        </select>
-      </Labeled>
+      {inbox && (
+        <Labeled label={text("field.type")}>
+          <select value={type} onChange={(e) => setType(e.target.value as "task" | "project" | "")}>
+            <option value="" />
+            <option value="task">{text("type.task")}</option>
+            <option value="project">{text("type.project")}</option>
+          </select>
+        </Labeled>
+      )}
       <TextField multiline label={text("field.name")} value={card.title} onCommit={(v) => save({ title: v })} />
       <div className="marks">
         <Check label={text("field.important")} value={card.important === true} onChange={(v) => save({ important: v })} />
@@ -245,41 +253,49 @@ function CardForm(props: {
         <Check label={text("field.easy")} value={card.easy === true} onChange={(v) => save({ easy: v })} />
       </div>
       <TextField multiline label={text("field.why")} value={card.why ?? ""} onCommit={(v) => save({ why: v })} />
-      <fieldset className="spheres">
-        <legend>{text("field.spheres")}</legend>
-        {lists.spheres.length === 0 && <p className="empty">{text("inbox.noSpheres")}</p>}
-        {lists.spheres.map((sphere) => (
-          <label key={sphere.id}>
-            <input
-              type="checkbox"
-              checked={spheres.includes(sphere.id)}
-              disabled={!spheres.includes(sphere.id) && spheres.length >= defaults.itemMaxSpheres}
-              onChange={(event) => {
-                const next = event.target.checked
-                  ? [...latestSpheres.current, sphere.id]
-                  : latestSpheres.current.filter((other) => other !== sphere.id);
-                latestSpheres.current = next;
-                setSpheres(next);
-                void save({ sphereIds: next }).then((ok) => {
-                  if (ok) return;
-                  latestSpheres.current = card.sphereIds;
-                  setSpheres(card.sphereIds);
-                });
-              }}
-            />
-            {sphere.name}
-          </label>
-        ))}
-      </fieldset>
-      <Choice label={text("field.kind")} value={card.actionKindId} options={lists.actionKinds} onChange={(v) => save({ actionKindId: v })} />
-      <Choice label={text("field.category")} value={card.categoryId} options={lists.categories} onChange={(v) => save({ categoryId: v })} />
+      {own && (
+        <fieldset className="spheres">
+          <legend>{text("field.spheres")}</legend>
+          {lists.spheres.length === 0 && <p className="empty">{text("inbox.noSpheres")}</p>}
+          {lists.spheres.map((sphere) => (
+            <label key={sphere.id}>
+              <input
+                type="checkbox"
+                checked={spheres.includes(sphere.id)}
+                disabled={!spheres.includes(sphere.id) && spheres.length >= defaults.itemMaxSpheres}
+                onChange={(event) => {
+                  const next = event.target.checked
+                    ? [...latestSpheres.current, sphere.id]
+                    : latestSpheres.current.filter((other) => other !== sphere.id);
+                  latestSpheres.current = next;
+                  setSpheres(next);
+                  void save({ sphereIds: next }).then((ok) => {
+                    if (ok) return;
+                    latestSpheres.current = card.sphereIds;
+                    setSpheres(card.sphereIds);
+                  });
+                }}
+              />
+              {sphere.name}
+            </label>
+          ))}
+        </fieldset>
+      )}
+      {own && (
+        <>
+          <Choice label={text("field.kind")} value={card.actionKindId} options={lists.actionKinds} onChange={(v) => save({ actionKindId: v })} />
+          <Choice label={text("field.category")} value={card.categoryId} options={lists.categories} onChange={(v) => save({ categoryId: v })} />
+        </>
+      )}
       <Labeled label={text("field.deadline")}>
         <input type="date" value={dateValue(card.deadline)} onChange={(e) => void save({ deadline: fromDate(e.target.value) })} />
       </Labeled>
       <Labeled label={text("field.remindAt")}>
         <input type="datetime-local" value={dateTimeValue(card.remindAt)} onChange={(e) => void save({ remindAt: fromDateTime(e.target.value) })} />
       </Labeled>
-      <Choice label={text("field.project")} value={card.projectId} options={projectOptions.map((p) => ({ id: p.id, name: p.title }))} onChange={(v) => save({ projectId: v })} />
+      {own && (
+        <Choice label={text("field.project")} value={card.projectId} options={projectOptions.map((p) => ({ id: p.id, name: p.title }))} onChange={(v) => save({ projectId: v })} />
+      )}
       <Check label={text("field.deferred")} value={card.deferred} onChange={(v) => save({ deferred: v })} />
       <Labeled label={text("field.deferredUntil")}>
         <input type="date" value={dateValue(card.deferredUntil)} onChange={(e) => void save({ deferredUntil: fromDate(e.target.value) })} />
@@ -294,9 +310,11 @@ function CardForm(props: {
         </select>
       </Labeled>
       <TextField multiline label={text("field.firstStep")} value={card.firstStepText ?? ""} onCommit={(v) => save({ firstStepText: v })} />
-      <button type="button" className="primary" disabled={!type || card.missing.length > 0} onClick={() => void promote()}>
-        {text("action.add")}
-      </button>
+      {inbox && (
+        <button type="button" className="primary" disabled={!type || card.missing.length > 0} onClick={() => void promote()}>
+          {text("action.add")}
+        </button>
+      )}
       <div className="danger-zone">
         {confirming ? (
           <>
@@ -318,7 +336,7 @@ function CardForm(props: {
   );
 }
 
-function Labeled(props: { label: string; children: ReactNode }) {
+export function Labeled(props: { label: string; children: ReactNode }) {
   return (
     <label className="field">
       <span>{props.label}</span>

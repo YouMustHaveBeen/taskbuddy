@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@telegram-apps/sdk": "^3.11.8",
+    "date-fns": "^4.4.0",
+    "date-fns-tz": "^3.2.0",
     "drizzle-orm": "^0.45.4",
     "grammy": "^1.48.0",
     "hono": "^4.13.23",
@@ -18,17 +20,17 @@
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
-    "wrangler": "^4.168.0",
-    "typescript": "5.9.3",
-    "vitest": "4.1.12",
     "@cloudflare/vitest-pool-workers": "^0.23.0",
     "@cloudflare/workers-types": "^5.20261125.1",
-    "drizzle-kit": "^0.31.11",
-    "vite": "^8.4.0",
-    "@vitejs/plugin-react": "^6.3.0",
     "@types/react": "^19.3.3",
     "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.3.0",
     "@vitest/runner": "4.1.12",
-    "@vitest/snapshot": "4.1.12"
+    "@vitest/snapshot": "4.1.12",
+    "drizzle-kit": "^0.31.11",
+    "typescript": "5.9.3",
+    "vite": "^8.4.0",
+    "vitest": "4.1.12",
+    "wrangler": "^4.168.0"
   }
 }

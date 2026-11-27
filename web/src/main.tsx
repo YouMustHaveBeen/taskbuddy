@@ -3,11 +3,12 @@ import { createRoot } from "react-dom/client";
 import { pickLanguage, t, type Language } from "../../i18n";
 import { Inbox } from "./Inbox";
 import { References } from "./References";
+import { Tasks } from "./Tasks";
 import { forgetSession, signIn, type PageUser } from "./session";
 
 function App() {
   const [state, setState] = useState<{ user?: PageUser } | undefined>();
-  const [tab, setTab] = useState<"inbox" | "references">("inbox");
+  const [tab, setTab] = useState<"inbox" | "tasks" | "references">("inbox");
 
   useEffect(() => {
     signIn()
@@ -27,22 +28,20 @@ function App() {
     <>
       <p>{t(language, "web.signedIn", { name: state.user.name })}</p>
       <nav>
-        {(["inbox", "references"] as const).map((name) => (
+        {(["inbox", "tasks", "references"] as const).map((name) => (
           <button
             key={name}
             type="button"
             aria-current={tab === name ? "page" : undefined}
             onClick={() => setTab(name)}
           >
-            {t(language, name === "inbox" ? "tab.inbox" : "tab.references")}
+            {t(language, `tab.${name}`)}
           </button>
         ))}
       </nav>
-      {tab === "inbox" ? (
-        <Inbox language={language} onSignedOut={signedOut} />
-      ) : (
-        <References language={language} onSignedOut={signedOut} />
-      )}
+      {tab === "inbox" && <Inbox language={language} onSignedOut={signedOut} />}
+      {tab === "tasks" && <Tasks language={language} onSignedOut={signedOut} />}
+      {tab === "references" && <References language={language} onSignedOut={signedOut} />}
     </>
   );
 }
