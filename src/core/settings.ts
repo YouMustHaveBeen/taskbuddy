@@ -8,4 +8,5 @@ export const defaults = {
   rewardMinutes: 10,
   itemTitleMaxLength: 4096,
   itemTextMaxLength: 1000,
+  itemMaxSpheres: 3,
 };

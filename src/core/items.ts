@@ -87,6 +87,7 @@ export function parsePatch(raw: unknown): Parsed | undefined {
     } else if (key === "sphereIds") {
       if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string" || entry === "")) return undefined;
       write.sphereIds = [...new Set(value as string[])];
+      if (write.sphereIds.length > defaults.itemMaxSpheres) return undefined;
       references.sphereIds = write.sphereIds;
     } else if (Object.hasOwn(simple, key)) {
       const parsed = simple[key](value);
@@ -109,12 +110,6 @@ export type CardView = Card & { missing: MissingField[] };
 
 function view(card: Card): CardView {
   return { ...card, missing: missingFields(card) };
-}
-
-function merged(card: Card, write: CardWrite): Card {
-  const next = { ...card, ...write.task, ...(write.title === undefined ? {} : { title: write.title }) } as Card;
-  if (write.sphereIds) next.sphereIds = write.sphereIds;
-  return next;
 }
 
 export const items = {
@@ -156,8 +151,7 @@ export const items = {
       if (write.task.waitingFor === null) write.task.waitingSince = null;
       else if (before.waitingFor === null) write.task.waitingSince = now;
     }
-    const kind = await saveCard(db, itemId, write, now);
-    return { outcome: "ok", card: view({ ...merged(before, write), kind }) };
+    return { outcome: "ok", card: view(await saveCard(db, itemId, write, now)) };
   },
 
   async archive(db: Db, userId: string, itemId: string): Promise<ItemOutcome> {

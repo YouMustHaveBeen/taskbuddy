@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { t, type Language, type TextKey } from "../../i18n";
+import { defaults } from "../../src/core/settings";
 import { api } from "./api";
 
 type Row = { id: string; title: string };
@@ -85,10 +86,14 @@ export function Inbox({ language, onSignedOut }: Props) {
     void reload();
   }, [reload]);
 
+  const creating = useRef(false);
+
   const create = async () => {
     const title = newTitle.trim();
-    if (!title) return;
+    if (!title || creating.current) return;
+    creating.current = true;
     const result = await api<{ id: string }>("POST", "/inbox", { title });
+    creating.current = false;
     if (result.status === 401) onSignedOut();
     if (!result.data) return;
     setNewTitle("");
@@ -165,12 +170,17 @@ function CardForm(props: {
   const [card, setCard] = useState<Card>();
   const [failed, setFailed] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
+  const [spheres, setSpheres] = useState<string[]>([]);
+  const latestSpheres = useRef<string[]>([]);
 
   useEffect(() => {
     void api<{ card: Card }>("GET", `/items/${id}`).then((result) => {
       if (result.status === 401) onSignedOut();
-      if (result.data) setCard(result.data.card);
-      else setFailed(true);
+      if (result.data) {
+        setCard(result.data.card);
+        setSpheres(result.data.card.sphereIds);
+        latestSpheres.current = result.data.card.sphereIds;
+      } else setFailed(true);
     });
   }, [id, onSignedOut]);
 
@@ -202,14 +212,20 @@ function CardForm(props: {
           <label key={sphere.id}>
             <input
               type="checkbox"
-              checked={card.sphereIds.includes(sphere.id)}
-              onChange={(event) =>
-                void save({
-                  sphereIds: event.target.checked
-                    ? [...card.sphereIds, sphere.id]
-                    : card.sphereIds.filter((other) => other !== sphere.id),
-                })
-              }
+              checked={spheres.includes(sphere.id)}
+              disabled={!spheres.includes(sphere.id) && spheres.length >= defaults.itemMaxSpheres}
+              onChange={(event) => {
+                const next = event.target.checked
+                  ? [...latestSpheres.current, sphere.id]
+                  : latestSpheres.current.filter((other) => other !== sphere.id);
+                latestSpheres.current = next;
+                setSpheres(next);
+                void save({ sphereIds: next }).then((ok) => {
+                  if (ok) return;
+                  latestSpheres.current = card.sphereIds;
+                  setSpheres(card.sphereIds);
+                });
+              }}
             />
             {sphere.name}
           </label>
@@ -254,13 +270,18 @@ function Labeled(props: { label: string; children: ReactNode }) {
 function TextField(props: { label: string; value: string; onCommit: (value: string) => Promise<boolean> }) {
   const { label, value, onCommit } = props;
   const [draft, setDraft] = useState(value);
-  useEffect(() => setDraft(value), [value]);
+  const editing = useRef(false);
+  useEffect(() => {
+    if (!editing.current) setDraft(value);
+  }, [value]);
   return (
     <Labeled label={label}>
       <input
         value={draft}
+        onFocus={() => (editing.current = true)}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={() => {
+          editing.current = false;
           if (draft === value) return;
           void onCommit(draft).then((ok) => {
             if (!ok) setDraft((current) => (current === draft ? value : current));

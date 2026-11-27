@@ -7,6 +7,7 @@ type CardView = {
   kind: string;
   title: string;
   why: string | null;
+  firstStepText: string | null;
   sphereIds: string[];
   waitingFor: string | null;
   waitingSince: number | null;
@@ -25,7 +26,9 @@ beforeEach(async () => {
 afterEach(() => vi.restoreAllMocks());
 
 async function addRef(token: string, list: string, name: string): Promise<string> {
-  return (await (await api(token, "POST", `/references/${list}`, { name })).json<{ id: string }>()).id;
+  const response = await api(token, "POST", `/references/${list}`, { name });
+  expect(response.status).toBe(200);
+  return (await response.json<{ id: string }>()).id;
 }
 
 async function newItem(token: string, title = "купить хлеб"): Promise<string> {
@@ -71,7 +74,8 @@ describe("бот: запись в инбокс", () => {
   it("незнакомому человеку бот не сохраняет запись", async () => {
     const calls = mockTelegram();
     await sendUpdate("привет", { id: 9999, first_name: "Eve", language_code: "en" });
-    expect(await inboxTitles(ann.token)).toEqual([]);
+    const count = await env.DB.prepare("SELECT COUNT(*) AS count FROM items").first<{ count: number }>();
+    expect(count?.count).toBe(0);
     expect(calls.some((call) => call.method === "sendMessage")).toBe(true);
   });
 });
@@ -166,6 +170,12 @@ describe("карточка: черновик и задача", () => {
     expect((await save(ann.token, id, { sphereIds: [foreignSphere] })).status).toBe(400);
     expect((await save(ann.token, id, { actionKindId: foreignKind })).status).toBe(400);
     expect((await save(ann.token, id, { categoryId: foreignCategory })).status).toBe(400);
+    const foreignProject = await newItem(bob.token, "чужой проект");
+    const bobSphere = await addRef(bob.token, "spheres", "семья");
+    const bobKind = await addRef(bob.token, "action-kinds", "сделать");
+    const ready = await save(bob.token, foreignProject, { ...marks, sphereIds: [bobSphere], actionKindId: bobKind, isProject: true });
+    expect(ready.card?.kind).toBe("task");
+    expect((await save(ann.token, id, { projectId: foreignProject })).status).toBe(400);
     expect((await save(ann.token, id, { projectId: crypto.randomUUID() })).status).toBe(400);
     const card = (await (await api(ann.token, "GET", `/items/${id}`)).json<{ card: CardView }>()).card;
     expect(card.sphereIds).toEqual([]);
@@ -204,5 +214,28 @@ describe("карточка: черновик и задача", () => {
     const row = await env.DB.prepare("SELECT archive_reason FROM items WHERE id = ?").bind(id).first();
     expect(row).toEqual({ archive_reason: "irrelevant" });
     expect((await api(ann.token, "DELETE", `/items/${id}`)).status).toBe(404);
+  });
+
+  it("архивную запись нельзя открыть и менять", async () => {
+    const id = await newItem(ann.token);
+    await api(ann.token, "DELETE", `/items/${id}`);
+    expect((await api(ann.token, "GET", `/items/${id}`)).status).toBe(404);
+    expect((await save(ann.token, id, { title: "правка" })).status).toBe(404);
+  });
+
+  it("у записи не больше трех сфер", async () => {
+    const id = await newItem(ann.token);
+    const ids = [await addRef(ann.token, "spheres", "а"), await addRef(ann.token, "spheres", "б"), await addRef(ann.token, "spheres", "в")];
+    const extra = await addRef(ann.token, "spheres", "г");
+    expect((await save(ann.token, id, { sphereIds: ids })).status).toBe(200);
+    expect((await save(ann.token, id, { sphereIds: [...ids, extra] })).status).toBe(400);
+  });
+
+  it("ответ на сохранение содержит состояние из базы, а не только последнюю правку", async () => {
+    const id = await newItem(ann.token);
+    await save(ann.token, id, { why: "первое" });
+    const second = await save(ann.token, id, { firstStepText: "шаг" });
+    expect(second.card?.why).toBe("первое");
+    expect(second.card?.firstStepText).toBe("шаг");
   });
 });

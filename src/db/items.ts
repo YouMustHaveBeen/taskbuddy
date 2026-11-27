@@ -162,7 +162,7 @@ export async function loadCard(db: Db, userId: string, id: string): Promise<Card
     db
       .select()
       .from(items)
-      .where(and(eq(items.id, id), visible(userId))),
+      .where(and(eq(items.id, id), visible(userId), isNull(items.archivedAt))),
     db.select().from(tasks).where(eq(tasks.id, id)),
     db.select({ sphereId: itemSpheres.sphereId }).from(itemSpheres).where(eq(itemSpheres.itemId, id)),
   ]);
@@ -224,11 +224,69 @@ const completeSql = `
   )
   AND EXISTS (SELECT 1 FROM item_spheres s WHERE s.item_id = items.id)`;
 
+type RawItem = {
+  id: string;
+  kind: ItemKind;
+  owner_id: string;
+  title: string;
+};
+
+type RawTask = {
+  important: number | null;
+  urgent: number | null;
+  impactful: number | null;
+  easy: number | null;
+  why: string | null;
+  action_kind_id: string | null;
+  category_id: string | null;
+  deadline: number | null;
+  remind_at: number | null;
+  project_id: string | null;
+  is_project: number;
+  deferred: number;
+  deferred_until: number | null;
+  queued: number;
+  waiting_for: string | null;
+  waiting_since: number | null;
+  flavor: Flavor | null;
+  first_step_text: string | null;
+};
+
+const flag = (value: number | null): boolean | null => (value === null ? null : value !== 0);
+
+function cardFromRaw(item: RawItem, task: RawTask, sphereIds: string[]): Card {
+  return {
+    id: item.id,
+    kind: item.kind,
+    ownerId: item.owner_id,
+    title: item.title,
+    important: flag(task.important),
+    urgent: flag(task.urgent),
+    impactful: flag(task.impactful),
+    easy: flag(task.easy),
+    why: task.why,
+    sphereIds,
+    actionKindId: task.action_kind_id,
+    categoryId: task.category_id,
+    deadline: task.deadline,
+    remindAt: task.remind_at,
+    projectId: task.project_id,
+    isProject: task.is_project !== 0,
+    deferred: task.deferred !== 0,
+    deferredUntil: task.deferred_until,
+    queued: task.queued !== 0,
+    waitingFor: task.waiting_for,
+    waitingSince: task.waiting_since,
+    flavor: task.flavor,
+    firstStepText: task.first_step_text,
+  };
+}
+
 /**
- * Сохраняет изменения карточки и пересчитывает вид (черновик в инбоксе или задача) в SQL, чтобы быстрые
- * одновременные сохранения разных полей не потеряли переход. Возвращает итоговый вид записи.
+ * Сохраняет изменения карточки, пересчитывает вид (черновик в инбоксе или задача) в SQL, чтобы быстрые
+ * одновременные сохранения разных полей не потеряли переход, и в том же batch читает итоговую карточку из базы.
  */
-export async function saveCard(db: Db, id: string, write: CardWrite, now: number): Promise<ItemKind> {
+export async function saveCard(db: Db, id: string, write: CardWrite, now: number): Promise<Card> {
   const d1 = db.$client;
   const statements: D1PreparedStatement[] = [d1.prepare("INSERT OR IGNORE INTO tasks (id) VALUES (?)").bind(id)];
 
@@ -262,11 +320,18 @@ export async function saveCard(db: Db, id: string, write: CardWrite, now: number
         WHERE id = ? AND kind IN ('inbox', 'task')`,
       )
       .bind(id),
-    d1.prepare("SELECT kind FROM items WHERE id = ?").bind(id),
+    d1.prepare("SELECT id, kind, owner_id, title FROM items WHERE id = ?").bind(id),
+    d1.prepare("SELECT * FROM tasks WHERE id = ?").bind(id),
+    d1.prepare("SELECT sphere_id FROM item_spheres WHERE item_id = ?").bind(id),
   );
 
-  const results = await d1.batch<{ kind: ItemKind }>(statements);
-  return results[results.length - 1].results[0].kind;
+  const results = await d1.batch(statements);
+  const [item, task, spheresRaw] = results.slice(-3);
+  return cardFromRaw(
+    item.results[0] as RawItem,
+    task.results[0] as RawTask,
+    (spheresRaw.results as { sphere_id: string }[]).map((row) => row.sphere_id),
+  );
 }
 
 export async function archiveItem(
