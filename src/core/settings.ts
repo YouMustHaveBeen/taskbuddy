@@ -14,6 +14,10 @@ export const defaults = {
   deadlineHorizonDays: 7,
   pickStaleDaysCap: 14,
   pickFrogBoost: 2,
+  /** Сколько раз за день в слоте можно отказаться и получить замену. */
+  refusalReplacements: 2,
+  /** Сколько выполненных задач заполняет кольцо «Пять задач». */
+  dayRingTasks: 5,
   /** Сколько дней хранится план дня; очистка в ночной задаче (этап 2а, часть 3). */
   dayPlanKeepDays: 30,
 };

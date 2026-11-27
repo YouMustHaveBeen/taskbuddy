@@ -74,6 +74,7 @@ export function parsePatch(raw: unknown): Parsed | undefined {
     queued: flag,
     waitingFor: (value) => text(value, max),
     firstStepText: (value) => text(value, max),
+    refusalNote: (value) => text(value, max),
     flavor: (value) => (value === null || flavors.includes(value as Flavor) ? value : undefined),
   };
 

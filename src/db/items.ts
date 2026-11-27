@@ -29,6 +29,7 @@ export type Card = {
   waitingSince: number | null;
   flavor: Flavor | null;
   firstStepText: string | null;
+  refusalNote: string | null;
 };
 
 /** Поля карточки, лежащие в таблице tasks (кроме id). */
@@ -52,6 +53,7 @@ export type TaskFields = Partial<
     | "waitingSince"
     | "flavor"
     | "firstStepText"
+    | "refusalNote"
   >
 >;
 
@@ -82,6 +84,7 @@ const taskColumns: Record<keyof TaskFields, string> = {
   waitingSince: "waiting_since",
   flavor: "flavor",
   firstStepText: "first_step_text",
+  refusalNote: "refusal_note",
 };
 
 const visible = (userId: string) => or(eq(items.ownerId, userId), eq(items.creatorId, userId));
@@ -151,6 +154,7 @@ function cardFrom(
     waitingSince: task?.waitingSince ?? null,
     flavor: task?.flavor ?? null,
     firstStepText: task?.firstStepText ?? null,
+    refusalNote: task?.refusalNote ?? null,
   };
 }
 
@@ -247,6 +251,7 @@ type RawTask = {
   waiting_since: number | null;
   flavor: Flavor | null;
   first_step_text: string | null;
+  refusal_note: string | null;
 };
 
 const flag = (value: number | null): boolean | null => (value === null ? null : value !== 0);
@@ -276,6 +281,7 @@ function cardFromRaw(item: RawItem, task: RawTask, sphereIds: string[]): Card {
     waitingSince: task.waiting_since,
     flavor: task.flavor,
     firstStepText: task.first_step_text,
+    refusalNote: task.refusal_note,
   };
 }
 

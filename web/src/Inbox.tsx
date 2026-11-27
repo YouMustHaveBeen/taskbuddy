@@ -36,6 +36,7 @@ type Card = {
   waitingFor: string | null;
   flavor: "dopamine" | "frog" | null;
   firstStepText: string | null;
+  refusalNote: string | null;
 };
 type Save = (patch: Record<string, unknown>) => Promise<boolean>;
 export type Text = (key: TextKey) => string;
@@ -310,6 +311,7 @@ export function CardForm(props: {
         </select>
       </Labeled>
       <TextField multiline label={text("field.firstStep")} value={card.firstStepText ?? ""} onCommit={(v) => save({ firstStepText: v })} />
+      <TextField multiline label={text("field.refusalNote")} value={card.refusalNote ?? ""} onCommit={(v) => save({ refusalNote: v })} />
       {inbox && (
         <button type="button" className="primary" disabled={!type || card.missing.length > 0} onClick={() => void promote()}>
           {text("action.add")}
