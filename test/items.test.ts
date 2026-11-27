@@ -143,6 +143,17 @@ describe("карточка: черновик и задача", () => {
     expect((await promote(ann.token, id)).status).toBe(409);
     expect(await inboxTitles(ann.token)).toEqual(["купить хлеб"]);
     expect((await promote(bob.token, id)).status).toBe(404);
+    const strays = await env.DB.prepare("SELECT count(*) AS n FROM tasks WHERE id = ?").bind(id).first<{ n: number }>();
+    expect(strays?.n).toBe(1);
+  });
+
+  it("архивную запись добавить задачей нельзя", async () => {
+    const id = await newItem(ann.token);
+    const sphere = await addRef(ann.token, "spheres", "дом");
+    const kind = await addRef(ann.token, "action-kinds", "купить");
+    await save(ann.token, id, { sphereIds: [sphere], actionKindId: kind });
+    await api(ann.token, "DELETE", `/items/${id}`);
+    expect((await promote(ann.token, id)).status).toBe(404);
   });
 
   it("метки приоритета не обязательны: без галочек запись тоже можно добавить задачей", async () => {

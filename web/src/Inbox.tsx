@@ -158,6 +158,7 @@ export function Inbox({ language, onSignedOut }: Props) {
                 onSignedOut={onSignedOut}
                 onDelete={() => remove(row.id)}
                 onPromoted={async () => {
+                  setRows((current) => current?.filter((item) => item.id !== row.id));
                   setOpenId(undefined);
                   await reload();
                 }}

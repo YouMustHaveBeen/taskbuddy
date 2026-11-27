@@ -326,15 +326,27 @@ export async function saveCard(db: Db, id: string, write: CardWrite, now: number
   );
 }
 
-/** Кнопка «Добавить задачу»: запись уходит из инбокса, только если обязательные поля заполнены. */
-export async function promoteCard(db: Db, id: string, now: number): Promise<boolean> {
-  const results = await db.$client.batch([
-    db.$client
-      .prepare(`UPDATE items SET kind = 'task', updated_at = ? WHERE id = ? AND kind = 'inbox' AND ${completeSql}`)
-      .bind(now, id),
-    db.$client.prepare("SELECT kind FROM items WHERE id = ?").bind(id),
+/** Кнопка «Добавить задачу»: условный перевод в задачи и чтение итоговой карточки одним batch. */
+export async function promoteCard(db: Db, userId: string, id: string, now: number): Promise<Card | undefined> {
+  const d1 = db.$client;
+  const mine = "(owner_id = ? OR creator_id = ?) AND archived_at IS NULL";
+  // QUERY BUDGET EXCEPTION: создание строки задачи, перевод в задачи и чтение карточки (запись, задача, сферы) — один batch
+  const results = await d1.batch([
+    d1.prepare(`INSERT OR IGNORE INTO tasks (id) SELECT id FROM items WHERE id = ? AND ${mine}`).bind(id, userId, userId),
+    d1
+      .prepare(`UPDATE items SET kind = 'task', updated_at = ? WHERE id = ? AND kind = 'inbox' AND ${mine} AND ${completeSql}`)
+      .bind(now, id, userId, userId),
+    d1.prepare(`SELECT id, kind, owner_id, title FROM items WHERE id = ? AND ${mine}`).bind(id, userId, userId),
+    d1.prepare("SELECT * FROM tasks WHERE id = ?").bind(id),
+    d1.prepare("SELECT sphere_id FROM item_spheres WHERE item_id = ?").bind(id),
   ]);
-  return (results[1].results[0] as { kind: ItemKind } | undefined)?.kind === "task";
+  const [, , item, task, spheresRaw] = results;
+  if (!item.results[0]) return undefined;
+  return cardFromRaw(
+    item.results[0] as RawItem,
+    task.results[0] as RawTask,
+    (spheresRaw.results as { sphere_id: string }[]).map((row) => row.sphere_id),
+  );
 }
 
 export async function archiveItem(
