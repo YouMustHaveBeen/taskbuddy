@@ -4,7 +4,7 @@ import { requireUser, type ApiEnv } from "./session";
 
 export const itemRoutes = new Hono<ApiEnv>();
 
-const statuses = { invalid: 400, not_found: 404 } as const;
+const statuses = { invalid: 400, not_found: 404, incomplete: 409 } as const;
 
 function reply(c: Context<ApiEnv>, outcome: ItemOutcome, body: Record<string, unknown> = {}) {
   return outcome === "ok" ? c.json(body) : c.json({ error: outcome }, statuses[outcome]);
@@ -31,6 +31,17 @@ itemRoutes.get("/items/:id", requireUser, async (c) => {
 
 itemRoutes.patch("/items/:id", requireUser, async (c) => {
   const { outcome, card } = await items.save(c.var.db, c.var.user.id, c.req.param("id"), await jsonBody(c), Date.now());
+  return reply(c, outcome, { card });
+});
+
+itemRoutes.post("/items/:id/promote", requireUser, async (c) => {
+  const { outcome, card } = await items.promote(
+    c.var.db,
+    c.var.user.id,
+    c.req.param("id"),
+    ((await jsonBody(c)) as { type?: unknown } | undefined)?.type,
+    Date.now(),
+  );
   return reply(c, outcome, { card });
 });
 

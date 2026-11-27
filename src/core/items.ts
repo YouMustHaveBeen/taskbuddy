@@ -1,6 +1,7 @@
 import type { Db } from "../db/client";
 import {
   archiveItem,
+  promoteCard,
   createInbox,
   listInbox,
   listProjects,
@@ -16,16 +17,12 @@ import {
 import { defaults } from "./settings";
 
 export type { Card, InboxRow };
-export type ItemOutcome = "ok" | "not_found" | "invalid";
-export type MissingField = "important" | "urgent" | "impactful" | "easy" | "why" | "spheres" | "kind";
+export type ItemOutcome = "ok" | "not_found" | "invalid" | "incomplete";
+export type MissingField = "why" | "spheres" | "kind";
 
 /** Обязательные поля карточки; те же условия повторены в SQL (completeSql в src/db/items.ts). */
 export function missingFields(card: Card): MissingField[] {
   const missing: MissingField[] = [];
-  if (card.important === null) missing.push("important");
-  if (card.urgent === null) missing.push("urgent");
-  if (card.impactful === null) missing.push("impactful");
-  if (card.easy === null) missing.push("easy");
   if ((card.important || card.impactful) && !card.why) missing.push("why");
   if (card.sphereIds.length === 0) missing.push("spheres");
   if (card.actionKindId === null) missing.push("kind");
@@ -71,7 +68,6 @@ export function parsePatch(raw: unknown): Parsed | undefined {
     deadline: moment,
     remindAt: moment,
     deferredUntil: moment,
-    isProject: flag,
     deferred: flag,
     queued: flag,
     waitingFor: (value) => text(value, max),
@@ -152,6 +148,16 @@ export const items = {
       else if (before.waitingFor === null) write.task.waitingSince = now;
     }
     return { outcome: "ok", card: view(await saveCard(db, itemId, write, now)) };
+  },
+
+  /** Кнопка «Добавить»: запись уходит из инбокса как задача или проект, если заполнены обязательные поля. */
+  async promote(db: Db, userId: string, itemId: string, rawType: unknown, now: number): Promise<{ outcome: ItemOutcome; card?: CardView }> {
+    if (rawType !== "task" && rawType !== "project") return { outcome: "invalid" };
+    const card = await promoteCard(db, userId, itemId, rawType === "project", now);
+    if (!card) return { outcome: "not_found" };
+    if (card === "other_kind") return { outcome: "invalid" };
+    if (card.kind === "task") return { outcome: "ok", card: view(card) };
+    return { outcome: card.kind === "inbox" ? "incomplete" : "invalid" };
   },
 
   async archive(db: Db, userId: string, itemId: string): Promise<ItemOutcome> {

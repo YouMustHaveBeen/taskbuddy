@@ -45,7 +45,6 @@ export type TaskFields = Partial<
     | "deadline"
     | "remindAt"
     | "projectId"
-    | "isProject"
     | "deferred"
     | "deferredUntil"
     | "queued"
@@ -76,7 +75,6 @@ const taskColumns: Record<keyof TaskFields, string> = {
   deadline: "deadline",
   remindAt: "remind_at",
   projectId: "project_id",
-  isProject: "is_project",
   deferred: "deferred",
   deferredUntil: "deferred_until",
   queued: "queued",
@@ -178,7 +176,7 @@ export async function referencesBelongTo(db: Db, ownerId: string, refs: Referenc
   const kindIds = one(refs.actionKindId);
   const categoryIds = one(refs.categoryId);
   const projectIds = one(refs.projectId);
-  // QUERY BUDGET EXCEPTION: проверка принадлежности четырех видов ссылок — один batch
+  // QUERY BUDGET EXCEPTION: проверка принадлежности четырех видов ссылок
   const [ownSpheres, ownKinds, ownCategories, ownProjects] = await db.batch([
     db
       .select({ id: spheres.id })
@@ -218,9 +216,8 @@ export async function referencesBelongTo(db: Db, ownerId: string, refs: Referenc
 const completeSql = `
   EXISTS (
     SELECT 1 FROM tasks t WHERE t.id = items.id
-      AND t.important IS NOT NULL AND t.urgent IS NOT NULL AND t.impactful IS NOT NULL AND t.easy IS NOT NULL
       AND t.action_kind_id IS NOT NULL
-      AND ((t.important = 0 AND t.impactful = 0) OR length(trim(coalesce(t.why, ''))) > 0)
+      AND ((coalesce(t.important, 0) = 0 AND coalesce(t.impactful, 0) = 0) OR length(trim(coalesce(t.why, ''))) > 0)
   )
   AND EXISTS (SELECT 1 FROM item_spheres s WHERE s.item_id = items.id)`;
 
@@ -283,8 +280,7 @@ function cardFromRaw(item: RawItem, task: RawTask, sphereIds: string[]): Card {
 }
 
 /**
- * Сохраняет изменения карточки, пересчитывает вид (черновик в инбоксе или задача) в SQL, чтобы быстрые
- * одновременные сохранения разных полей не потеряли переход, и в том же batch читает итоговую карточку из базы.
+ * Сохраняет изменения карточки (вид записи не меняет) и в том же batch читает итоговую карточку из базы.
  */
 export async function saveCard(db: Db, id: string, write: CardWrite, now: number): Promise<Card> {
   const d1 = db.$client;
@@ -314,12 +310,6 @@ export async function saveCard(db: Db, id: string, write: CardWrite, now: number
   }
 
   statements.push(
-    d1
-      .prepare(
-        `UPDATE items SET kind = CASE WHEN ${completeSql} THEN 'task' ELSE 'inbox' END
-        WHERE id = ? AND kind IN ('inbox', 'task')`,
-      )
-      .bind(id),
     d1.prepare("SELECT id, kind, owner_id, title FROM items WHERE id = ?").bind(id),
     d1.prepare("SELECT * FROM tasks WHERE id = ?").bind(id),
     d1.prepare("SELECT sphere_id FROM item_spheres WHERE item_id = ?").bind(id),
@@ -327,6 +317,37 @@ export async function saveCard(db: Db, id: string, write: CardWrite, now: number
 
   const results = await d1.batch(statements);
   const [item, task, spheresRaw] = results.slice(-3);
+  return cardFromRaw(
+    item.results[0] as RawItem,
+    task.results[0] as RawTask,
+    (spheresRaw.results as { sphere_id: string }[]).map((row) => row.sphere_id),
+  );
+}
+
+/** Кнопка «Добавить»: условный перевод в задачи или проекты и чтение итоговой карточки одним batch. */
+export async function promoteCard(db: Db, userId: string, id: string, asProject: boolean, now: number): Promise<Card | "other_kind" | undefined> {
+  const d1 = db.$client;
+  const mine = "(owner_id = ? OR creator_id = ?) AND archived_at IS NULL";
+  // QUERY BUDGET EXCEPTION: создание строки задачи, перевод в задачи и чтение карточки (запись, задача, сферы)
+  const results = await d1.batch([
+    d1.prepare(`INSERT OR IGNORE INTO tasks (id) SELECT id FROM items WHERE id = ? AND kind IN ('inbox', 'task') AND ${mine}`).bind(id, userId, userId),
+    d1
+      .prepare(
+        `UPDATE tasks SET is_project = ? WHERE id = ? AND EXISTS (
+          SELECT 1 FROM items WHERE items.id = tasks.id AND items.kind = 'inbox' AND ${mine} AND ${completeSql})`,
+      )
+      .bind(Number(asProject), id, userId, userId),
+    d1
+      .prepare(`UPDATE items SET kind = 'task', updated_at = ? WHERE id = ? AND kind = 'inbox' AND ${mine} AND ${completeSql}`)
+      .bind(now, id, userId, userId),
+    d1.prepare(`SELECT id, kind, owner_id, title FROM items WHERE id = ? AND ${mine}`).bind(id, userId, userId),
+    d1.prepare("SELECT * FROM tasks WHERE id = ?").bind(id),
+    d1.prepare("SELECT sphere_id FROM item_spheres WHERE item_id = ?").bind(id),
+  ]);
+  const [, , , item, task, spheresRaw] = results;
+  const found = item.results[0] as RawItem | undefined;
+  if (!found) return undefined;
+  if (found.kind !== "inbox" && found.kind !== "task") return "other_kind";
   return cardFromRaw(
     item.results[0] as RawItem,
     task.results[0] as RawTask,
