@@ -6,9 +6,16 @@ import { api } from "./api";
 type Row = { id: string; title: string };
 type NameRow = { id: string; name: string };
 type Lists = { spheres: NameRow[]; actionKinds: NameRow[]; categories: NameRow[] };
+const missingLabels: Record<string, "field.why" | "field.spheres" | "field.kind"> = {
+  why: "field.why",
+  spheres: "field.spheres",
+  kind: "field.kind",
+};
+
 type Card = {
   id: string;
   kind: string;
+  missing: string[];
   title: string;
   important: boolean | null;
   urgent: boolean | null;
@@ -150,6 +157,10 @@ export function Inbox({ language, onSignedOut }: Props) {
                 projects={projects}
                 onSignedOut={onSignedOut}
                 onDelete={() => remove(row.id)}
+                onPromoted={async () => {
+                  setOpenId(undefined);
+                  await reload();
+                }}
               />
             )}
           </li>
@@ -166,8 +177,9 @@ function CardForm(props: {
   projects: Row[];
   onSignedOut: () => void;
   onDelete: () => Promise<void>;
+  onPromoted: () => Promise<void>;
 }) {
-  const { id, text, lists, projects, onSignedOut, onDelete } = props;
+  const { id, text, lists, projects, onSignedOut, onDelete, onPromoted } = props;
   const [confirming, setConfirming] = useState(false);
   const [card, setCard] = useState<Card>();
   const [failed, setFailed] = useState(false);
@@ -195,13 +207,25 @@ function CardForm(props: {
     return true;
   };
 
+  const promote = async () => {
+    const result = await api<{ card: Card }>("POST", `/items/${id}/promote`);
+    if (result.status === 401) onSignedOut();
+    if (result.data) await onPromoted();
+    else if (result.status === 409) await save({});
+    else setSaveFailed(true);
+  };
+
   if (!card) return failed ? <p role="alert">{text("error.load")}</p> : null;
   const projectOptions = projects.filter((project) => project.id !== id);
 
   return (
     <div className="card">
       {saveFailed && <p role="alert">{text("error.generic")}</p>}
-      <p className="hint">{text(card.kind === "task" ? "card.task" : "card.draft")}</p>
+      {card.missing.length > 0 && (
+        <p className="hint">
+          {text("card.missing")} {card.missing.map((field) => text(missingLabels[field] ?? "field.name").toLowerCase()).join(", ")}
+        </p>
+      )}
       <TextField multiline label={text("field.name")} value={card.title} onCommit={(v) => save({ title: v })} />
       <div className="marks">
         <Check label={text("field.important")} value={card.important === true} onChange={(v) => save({ important: v })} />
@@ -260,6 +284,9 @@ function CardForm(props: {
         </select>
       </Labeled>
       <TextField multiline label={text("field.firstStep")} value={card.firstStepText ?? ""} onCommit={(v) => save({ firstStepText: v })} />
+      <button type="button" className="primary" disabled={card.missing.length > 0} onClick={() => void promote()}>
+        {text("action.addTask")}
+      </button>
       <div className="danger-zone">
         {confirming ? (
           <>

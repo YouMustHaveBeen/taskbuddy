@@ -1,6 +1,7 @@
 import type { Db } from "../db/client";
 import {
   archiveItem,
+  promoteCard,
   createInbox,
   listInbox,
   listProjects,
@@ -16,7 +17,7 @@ import {
 import { defaults } from "./settings";
 
 export type { Card, InboxRow };
-export type ItemOutcome = "ok" | "not_found" | "invalid";
+export type ItemOutcome = "ok" | "not_found" | "invalid" | "incomplete";
 export type MissingField = "why" | "spheres" | "kind";
 
 /** Обязательные поля карточки; те же условия повторены в SQL (completeSql в src/db/items.ts). */
@@ -148,6 +149,17 @@ export const items = {
       else if (before.waitingFor === null) write.task.waitingSince = now;
     }
     return { outcome: "ok", card: view(await saveCard(db, itemId, write, now)) };
+  },
+
+  /** Кнопка «Добавить задачу»: запись уходит из инбокса, если заполнены обязательные поля. */
+  async promote(db: Db, userId: string, itemId: string, now: number): Promise<{ outcome: ItemOutcome; card?: CardView }> {
+    const before = await loadCard(db, userId, itemId);
+    if (!before) return { outcome: "not_found" };
+    if (before.kind !== "inbox" && before.kind !== "task") return { outcome: "invalid" };
+    if (missingFields(before).length > 0) return { outcome: "incomplete" };
+    if (!(await promoteCard(db, itemId, now))) return { outcome: "incomplete" };
+    const card = await loadCard(db, userId, itemId);
+    return card ? { outcome: "ok", card: view(card) } : { outcome: "not_found" };
   },
 
   async archive(db: Db, userId: string, itemId: string): Promise<ItemOutcome> {

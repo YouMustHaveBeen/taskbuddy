@@ -282,8 +282,7 @@ function cardFromRaw(item: RawItem, task: RawTask, sphereIds: string[]): Card {
 }
 
 /**
- * Сохраняет изменения карточки, пересчитывает вид (черновик в инбоксе или задача) в SQL, чтобы быстрые
- * одновременные сохранения разных полей не потеряли переход, и в том же batch читает итоговую карточку из базы.
+ * Сохраняет изменения карточки (вид записи не меняет) и в том же batch читает итоговую карточку из базы.
  */
 export async function saveCard(db: Db, id: string, write: CardWrite, now: number): Promise<Card> {
   const d1 = db.$client;
@@ -313,12 +312,6 @@ export async function saveCard(db: Db, id: string, write: CardWrite, now: number
   }
 
   statements.push(
-    d1
-      .prepare(
-        `UPDATE items SET kind = CASE WHEN ${completeSql} THEN 'task' ELSE 'inbox' END
-        WHERE id = ? AND kind IN ('inbox', 'task')`,
-      )
-      .bind(id),
     d1.prepare("SELECT id, kind, owner_id, title FROM items WHERE id = ?").bind(id),
     d1.prepare("SELECT * FROM tasks WHERE id = ?").bind(id),
     d1.prepare("SELECT sphere_id FROM item_spheres WHERE item_id = ?").bind(id),
@@ -331,6 +324,17 @@ export async function saveCard(db: Db, id: string, write: CardWrite, now: number
     task.results[0] as RawTask,
     (spheresRaw.results as { sphere_id: string }[]).map((row) => row.sphere_id),
   );
+}
+
+/** Кнопка «Добавить задачу»: запись уходит из инбокса, только если обязательные поля заполнены. */
+export async function promoteCard(db: Db, id: string, now: number): Promise<boolean> {
+  const results = await db.$client.batch([
+    db.$client
+      .prepare(`UPDATE items SET kind = 'task', updated_at = ? WHERE id = ? AND kind = 'inbox' AND ${completeSql}`)
+      .bind(now, id),
+    db.$client.prepare("SELECT kind FROM items WHERE id = ?").bind(id),
+  ]);
+  return (results[1].results[0] as { kind: ItemKind } | undefined)?.kind === "task";
 }
 
 export async function archiveItem(

@@ -42,6 +42,11 @@ async function save(token: string, id: string, patch: unknown): Promise<{ status
   return { status: response.status, card: response.status === 200 ? (await response.json<{ card: CardView }>()).card : undefined };
 }
 
+async function promote(token: string, id: string): Promise<{ status: number; card?: CardView }> {
+  const response = await api(token, "POST", `/items/${id}/promote`);
+  return { status: response.status, card: response.status === 200 ? (await response.json<{ card: CardView }>()).card : undefined };
+}
+
 async function inboxTitles(token: string): Promise<string[]> {
   const body = await (await api(token, "GET", "/inbox")).json<{ items: { title: string }[] }>();
   return body.items.map((item) => item.title);
@@ -116,60 +121,60 @@ describe("карточка: черновик и задача", () => {
     expect(await inboxTitles(ann.token)).toEqual(["купить хлеб"]);
   });
 
-  it("запись становится задачей, когда заполнено последнее обязательное поле", async () => {
+  it("запись уходит из инбокса только по кнопке «Добавить задачу»", async () => {
     const id = await newItem(ann.token);
     const sphere = await addRef(ann.token, "spheres", "дом");
     const kind = await addRef(ann.token, "action-kinds", "купить");
     await save(ann.token, id, marks);
     await save(ann.token, id, { sphereIds: [sphere] });
-    const done = await save(ann.token, id, { actionKindId: kind });
+    const filled = await save(ann.token, id, { actionKindId: kind });
+    expect(filled.card?.kind).toBe("inbox");
+    expect(filled.card?.missing).toEqual([]);
+    expect(await inboxTitles(ann.token)).toEqual(["купить хлеб"]);
+    const done = await promote(ann.token, id);
     expect(done.card?.kind).toBe("task");
-    expect(done.card?.missing).toEqual([]);
     expect(await inboxTitles(ann.token)).toEqual([]);
   });
 
-  it("метки приоритета не обязательны: без галочек запись тоже становится задачей", async () => {
+  it("кнопка не срабатывает, пока не заполнены обязательные поля", async () => {
+    const id = await newItem(ann.token);
+    expect((await promote(ann.token, id)).status).toBe(409);
+    await save(ann.token, id, marks);
+    expect((await promote(ann.token, id)).status).toBe(409);
+    expect(await inboxTitles(ann.token)).toEqual(["купить хлеб"]);
+    expect((await promote(bob.token, id)).status).toBe(404);
+  });
+
+  it("метки приоритета не обязательны: без галочек запись тоже можно добавить задачей", async () => {
     const id = await newItem(ann.token);
     const sphere = await addRef(ann.token, "spheres", "дом");
     const kind = await addRef(ann.token, "action-kinds", "купить");
-    const done = await save(ann.token, id, { sphereIds: [sphere], actionKindId: kind });
-    expect(done.card?.kind).toBe("task");
-    expect(done.card?.missing).toEqual([]);
+    const filled = await save(ann.token, id, { sphereIds: [sphere], actionKindId: kind });
+    expect(filled.card?.missing).toEqual([]);
+    expect((await promote(ann.token, id)).card?.kind).toBe("task");
   });
 
-  it("если важно или есть влияние, нужна фраза «зачем»", async () => {
+  it("если важно или есть эффект, нужна фраза «зачем»", async () => {
     const id = await newItem(ann.token);
     const sphere = await addRef(ann.token, "spheres", "дом");
     const kind = await addRef(ann.token, "action-kinds", "купить");
     const first = await save(ann.token, id, { ...marks, important: true, sphereIds: [sphere], actionKindId: kind });
-    expect(first.card?.kind).toBe("inbox");
     expect(first.card?.missing).toEqual(["why"]);
+    expect((await promote(ann.token, id)).status).toBe(409);
     const second = await save(ann.token, id, { why: "  чтобы был завтрак  " });
-    expect(second.card?.kind).toBe("task");
     expect(second.card?.why).toBe("чтобы был завтрак");
+    expect((await promote(ann.token, id)).card?.kind).toBe("task");
   });
 
-  it("одновременные сохранения разных полей не теряют переход в задачу", async () => {
-    const id = await newItem(ann.token);
-    const sphere = await addRef(ann.token, "spheres", "дом");
-    const kind = await addRef(ann.token, "action-kinds", "купить");
-    await Promise.all([
-      save(ann.token, id, marks),
-      save(ann.token, id, { sphereIds: [sphere] }),
-      save(ann.token, id, { actionKindId: kind }),
-    ]);
-    const card = (await (await api(ann.token, "GET", `/items/${id}`)).json<{ card: CardView }>()).card;
-    expect(card.kind).toBe("task");
-  });
-
-  it("если очистить обязательное поле, запись возвращается в инбокс", async () => {
+  it("повторное нажатие кнопки безопасно, а очистка поля у задачи ее не возвращает в инбокс", async () => {
     const id = await newItem(ann.token);
     const sphere = await addRef(ann.token, "spheres", "дом");
     const kind = await addRef(ann.token, "action-kinds", "купить");
     await save(ann.token, id, { ...marks, sphereIds: [sphere], actionKindId: kind });
+    await Promise.all([promote(ann.token, id), promote(ann.token, id)]);
     const back = await save(ann.token, id, { sphereIds: [] });
-    expect(back.card?.kind).toBe("inbox");
-    expect(await inboxTitles(ann.token)).toEqual(["купить хлеб"]);
+    expect(back.card?.kind).toBe("task");
+    expect(await inboxTitles(ann.token)).toEqual([]);
   });
 
   it("нельзя взять сферу, вид, категорию или проект другого пользователя", async () => {
@@ -183,8 +188,8 @@ describe("карточка: черновик и задача", () => {
     const foreignProject = await newItem(bob.token, "чужой проект");
     const bobSphere = await addRef(bob.token, "spheres", "семья");
     const bobKind = await addRef(bob.token, "action-kinds", "сделать");
-    const ready = await save(bob.token, foreignProject, { ...marks, sphereIds: [bobSphere], actionKindId: bobKind, isProject: true });
-    expect(ready.card?.kind).toBe("task");
+    await save(bob.token, foreignProject, { ...marks, sphereIds: [bobSphere], actionKindId: bobKind, isProject: true });
+    expect((await promote(bob.token, foreignProject)).card?.kind).toBe("task");
     expect((await save(ann.token, id, { projectId: foreignProject })).status).toBe(400);
     expect((await save(ann.token, id, { projectId: crypto.randomUUID() })).status).toBe(400);
     const card = (await (await api(ann.token, "GET", `/items/${id}`)).json<{ card: CardView }>()).card;
@@ -198,6 +203,7 @@ describe("карточка: черновик и задача", () => {
     const step = await newItem(ann.token, "купить краску");
     expect((await save(ann.token, step, { projectId: project })).status).toBe(400);
     await save(ann.token, project, { ...marks, sphereIds: [sphere], actionKindId: kind, isProject: true });
+    await promote(ann.token, project);
     expect((await save(ann.token, step, { projectId: project })).status).toBe(200);
     expect((await save(ann.token, project, { projectId: project })).status).toBe(400);
     const list = await (await api(ann.token, "GET", "/projects")).json<{ projects: { id: string }[] }>();
