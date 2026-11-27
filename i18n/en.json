@@ -34,9 +34,6 @@
   "field.urgent": "Urgent",
   "field.impactful": "Impact",
   "field.easy": "Easy",
-  "value.unset": "Not set",
-  "value.yes": "Yes",
-  "value.no": "No",
   "field.why": "Why it matters",
   "field.spheres": "Areas",
   "field.kind": "Kind",
@@ -53,6 +50,6 @@
   "flavor.dopamine": "Dopamine",
   "flavor.frog": "Frog",
   "field.firstStep": "First step",
-  "card.draft": "Draft. To make this a task, fill in: important, urgent, impact, easy, an area and a kind; and if it is important or has impact, also “Why it matters”.",
+  "card.draft": "Draft. To make this a task, fill in an area and a kind; and if “Important” or “Impact” is checked, also “Why it matters”.",
   "card.task": "This entry is now a task."
 }

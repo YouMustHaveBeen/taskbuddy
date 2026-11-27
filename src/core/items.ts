@@ -17,15 +17,11 @@ import { defaults } from "./settings";
 
 export type { Card, InboxRow };
 export type ItemOutcome = "ok" | "not_found" | "invalid";
-export type MissingField = "important" | "urgent" | "impactful" | "easy" | "why" | "spheres" | "kind";
+export type MissingField = "why" | "spheres" | "kind";
 
 /** Обязательные поля карточки; те же условия повторены в SQL (completeSql в src/db/items.ts). */
 export function missingFields(card: Card): MissingField[] {
   const missing: MissingField[] = [];
-  if (card.important === null) missing.push("important");
-  if (card.urgent === null) missing.push("urgent");
-  if (card.impactful === null) missing.push("impactful");
-  if (card.easy === null) missing.push("easy");
   if ((card.important || card.impactful) && !card.why) missing.push("why");
   if (card.sphereIds.length === 0) missing.push("spheres");
   if (card.actionKindId === null) missing.push("kind");

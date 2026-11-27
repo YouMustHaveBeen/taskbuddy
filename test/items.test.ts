@@ -128,6 +128,15 @@ describe("карточка: черновик и задача", () => {
     expect(await inboxTitles(ann.token)).toEqual([]);
   });
 
+  it("метки приоритета не обязательны: без галочек запись тоже становится задачей", async () => {
+    const id = await newItem(ann.token);
+    const sphere = await addRef(ann.token, "spheres", "дом");
+    const kind = await addRef(ann.token, "action-kinds", "купить");
+    const done = await save(ann.token, id, { sphereIds: [sphere], actionKindId: kind });
+    expect(done.card?.kind).toBe("task");
+    expect(done.card?.missing).toEqual([]);
+  });
+
   it("если важно или есть влияние, нужна фраза «зачем»", async () => {
     const id = await newItem(ann.token);
     const sphere = await addRef(ann.token, "spheres", "дом");

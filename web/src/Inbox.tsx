@@ -201,10 +201,10 @@ function CardForm(props: {
       {saveFailed && <p role="alert">{text("error.generic")}</p>}
       <p>{text(card.kind === "task" ? "card.task" : "card.draft")}</p>
       <TextField label={text("field.name")} value={card.title} onCommit={(v) => save({ title: v })} />
-      <Mark label={text("field.important")} value={card.important} text={text} onChange={(v) => save({ important: v })} />
-      <Mark label={text("field.urgent")} value={card.urgent} text={text} onChange={(v) => save({ urgent: v })} />
-      <Mark label={text("field.impactful")} value={card.impactful} text={text} onChange={(v) => save({ impactful: v })} />
-      <Mark label={text("field.easy")} value={card.easy} text={text} onChange={(v) => save({ easy: v })} />
+      <Check label={text("field.important")} value={card.important === true} onChange={(v) => save({ important: v })} />
+      <Check label={text("field.urgent")} value={card.urgent === true} onChange={(v) => save({ urgent: v })} />
+      <Check label={text("field.impactful")} value={card.impactful === true} onChange={(v) => save({ impactful: v })} />
+      <Check label={text("field.easy")} value={card.easy === true} onChange={(v) => save({ easy: v })} />
       <TextField label={text("field.why")} value={card.why ?? ""} onCommit={(v) => save({ why: v })} />
       <fieldset>
         <legend>{text("field.spheres")}</legend>
@@ -288,20 +288,6 @@ function TextField(props: { label: string; value: string; onCommit: (value: stri
           });
         }}
       />
-    </Labeled>
-  );
-}
-
-function Mark(props: { label: string; value: boolean | null; text: Text; onChange: (value: boolean | null) => Promise<boolean> }) {
-  const { label, value, text, onChange } = props;
-  const current = value === null ? "" : value ? "yes" : "no";
-  return (
-    <Labeled label={label}>
-      <select value={current} onChange={(e) => void onChange(e.target.value === "" ? null : e.target.value === "yes")}>
-        <option value="">{text("value.unset")}</option>
-        <option value="yes">{text("value.yes")}</option>
-        <option value="no">{text("value.no")}</option>
-      </select>
     </Labeled>
   );
 }

@@ -218,9 +218,8 @@ export async function referencesBelongTo(db: Db, ownerId: string, refs: Referenc
 const completeSql = `
   EXISTS (
     SELECT 1 FROM tasks t WHERE t.id = items.id
-      AND t.important IS NOT NULL AND t.urgent IS NOT NULL AND t.impactful IS NOT NULL AND t.easy IS NOT NULL
       AND t.action_kind_id IS NOT NULL
-      AND ((t.important = 0 AND t.impactful = 0) OR length(trim(coalesce(t.why, ''))) > 0)
+      AND ((coalesce(t.important, 0) = 0 AND coalesce(t.impactful, 0) = 0) OR length(trim(coalesce(t.why, ''))) > 0)
   )
   AND EXISTS (SELECT 1 FROM item_spheres s WHERE s.item_id = items.id)`;
 
