@@ -4,6 +4,7 @@ import { defaults } from "../core/settings";
 import { createDb } from "../db/client";
 import type { User } from "../db/users";
 import { verifyInitData } from "../telegram/initData";
+import { itemRoutes } from "./items";
 import { referenceRoutes } from "./references";
 import { requireUser, type ApiEnv } from "./session";
 
@@ -32,6 +33,7 @@ apiRoutes.post("/auth/link", async (c) => {
 apiRoutes.get("/me", requireUser, (c) => c.json({ user: publicUser(c.var.user) }));
 
 apiRoutes.route("/references", referenceRoutes);
+apiRoutes.route("/", itemRoutes);
 
 async function bodyField(c: Context, name: string): Promise<unknown> {
   const body: unknown = await c.req.json().catch(() => undefined);

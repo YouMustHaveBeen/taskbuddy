@@ -6,4 +6,7 @@ export const defaults = {
   tgUpdateRetentionHours: 24,
   referenceNameMaxLength: 100,
   rewardMinutes: 10,
+  itemTitleMaxLength: 4096,
+  itemTextMaxLength: 1000,
+  itemMaxSpheres: 3,
 };
