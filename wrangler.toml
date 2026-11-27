@@ -14,5 +14,5 @@ run_worker_first = ["/api/*", "/tg/*"]
 [[d1_databases]]
 binding = "DB"
 database_name = "taskbuddy"
-database_id = "DATABASE_ID"
+database_id = "bb10ce79-5898-403d-8211-7ee00b0d5df9"
 migrations_dir = "migrations"
