@@ -1,11 +1,9 @@
-import type { Candidate, PlanPick, PlanSlot } from "../core/day";
+import type { Candidate, PlanPick, PlanSlot, TaskFlags } from "../core/day";
 import type { Db } from "./client";
 
-/** «Можно сейчас» по полям задачи `t`: не в очереди, не «жду», не отложено (или срок отложения прошел); то же условие в taskStatus (src/core/day.ts). */
-const canNowSql = (t: string) =>
-  `${t}.queued = 0 AND ${t}.waiting_for IS NULL AND (${t}.deferred = 0 OR (${t}.deferred_until IS NOT NULL AND ${t}.deferred_until <= ?1))`;
+type Flags = { deferred: number; deferred_until: number | null; queued: number; waiting_for: string | null };
 
-type CandidateRaw = {
+type CandidateRaw = Flags & {
   id: string;
   important: number | null;
   urgent: number | null;
@@ -17,20 +15,28 @@ type CandidateRaw = {
 };
 
 const flag = (value: number | null): boolean | null => (value === null ? null : value !== 0);
+const flags = (row: Flags): TaskFlags => ({
+  deferred: row.deferred !== 0,
+  deferredUntil: row.deferred_until,
+  queued: row.queued !== 0,
+  waitingFor: row.waiting_for,
+});
 
 /**
- * Задачи владелицы, которые можно делать сейчас: не проекты, не шаги проекта в фокусе или отложенного проекта.
- * Индекс items_owner_kind (owner_id, kind, archived_at), задача и проект по первичному ключу tasks.
+ * Задачи владелицы для плана дня: не проекты, не шаги проекта в фокусе или отложенного проекта; задачи на паузе
+ * тоже (они идут только в блок дедлайнов). Индекс items_owner_kind (owner_id, kind, archived_at), задача и проект
+ * по первичному ключу tasks.
  */
-export async function nowCandidates(db: Db, userId: string, now: number): Promise<Candidate[]> {
+export async function planCandidates(db: Db, userId: string, now: number): Promise<(Omit<Candidate, "pause"> & TaskFlags)[]> {
   const { results } = await db.$client
     .prepare(
-      `SELECT i.id, t.important, t.urgent, t.impactful, t.easy, t.flavor, t.deadline, t.last_shown_at
+      `SELECT i.id, t.important, t.urgent, t.impactful, t.easy, t.flavor, t.deadline, t.last_shown_at,
+        t.deferred, t.deferred_until, t.queued, t.waiting_for
       FROM items i
       JOIN tasks t ON t.id = i.id
       LEFT JOIN tasks p ON p.id = t.project_id
       WHERE i.owner_id = ?2 AND i.kind = 'task' AND i.archived_at IS NULL AND i.assign_state IN ('none', 'accepted')
-        AND t.is_project = 0 AND ${canNowSql("t")}
+        AND t.is_project = 0
         AND (p.id IS NULL OR (p.in_focus = 0 AND NOT (p.deferred = 1 AND (p.deferred_until IS NULL OR p.deferred_until > ?1))))`,
     )
     .bind(now, userId)
@@ -44,10 +50,11 @@ export async function nowCandidates(db: Db, userId: string, now: number): Promis
     flavor: row.flavor,
     deadline: row.deadline,
     lastShownAt: row.last_shown_at,
+    ...flags(row),
   }));
 }
 
-export type PlanRow = {
+export type PlanRow = TaskFlags & {
   slot: PlanSlot;
   position: number;
   itemId: string;
@@ -61,7 +68,7 @@ export type PlanRow = {
   deadline: number | null;
 };
 
-type PlanRaw = {
+type PlanRaw = Flags & {
   slot: PlanSlot;
   position: number;
   item_id: string;
@@ -77,7 +84,7 @@ type PlanRaw = {
 
 /** План дня с названиями и метками задач; первичный ключ day_plan (user_id, date, …), задача по первичному ключу. */
 const planSql = `SELECT d.slot, d.position, d.item_id, d.state, d.replacements, i.title,
-    t.important, t.urgent, t.impactful, t.easy, t.deadline
+    t.important, t.urgent, t.impactful, t.easy, t.deadline, t.deferred, t.deferred_until, t.queued, t.waiting_for
   FROM day_plan d
   JOIN items i ON i.id = d.item_id
   LEFT JOIN tasks t ON t.id = d.item_id
@@ -97,6 +104,7 @@ function planFromRaw(rows: PlanRaw[]): PlanRow[] {
     impactful: flag(row.impactful),
     easy: flag(row.easy),
     deadline: row.deadline,
+    ...flags(row),
   }));
 }
 

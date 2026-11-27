@@ -1,6 +1,6 @@
 import { formatInTimeZone } from "date-fns-tz";
 import type { Db } from "../db/client";
-import { loadPlan, nowCandidates, savePlan, type PlanRow } from "../db/day";
+import { loadPlan, planCandidates, savePlan, type PlanRow } from "../db/day";
 import { defaults } from "./settings";
 
 export type Marks = { important: boolean | null; urgent: boolean | null; impactful: boolean | null; easy: boolean | null };
@@ -43,14 +43,25 @@ export type TaskFlags = {
   waitingFor: string | null;
 };
 
-/** Статус задачи: можно делать сейчас или пауза (отложено, очередь, жду); то же условие в SQL (canNowSql в src/db/day.ts). */
+export type Pause = "deferred" | "queued" | "waiting";
+
+/** Причина паузы: отложено (без даты или дата еще не наступила), в очереди, жду; null — можно делать сейчас. */
+export function pauseReason(task: TaskFlags, now: number): Pause | null {
+  if (task.deferred && (task.deferredUntil === null || task.deferredUntil > now)) return "deferred";
+  if (task.queued) return "queued";
+  if (task.waitingFor !== null) return "waiting";
+  return null;
+}
+
+/** Статус задачи: можно делать сейчас или пауза (отложено, очередь, жду). */
 export function taskStatus(task: TaskFlags, now: number): "now" | "paused" {
-  const deferred = task.deferred && (task.deferredUntil === null || task.deferredUntil > now);
-  return deferred || task.queued || task.waitingFor !== null ? "paused" : "now";
+  return pauseReason(task, now) === null ? "now" : "paused";
 }
 
 export type Candidate = Marks & {
   id: string;
+  /** Причина паузы на момент составления плана; за кнопки идут только задачи без паузы. */
+  pause: Pause | null;
   flavor: "dopamine" | "frog" | null;
   deadline: number | null;
   lastShownAt: number | null;
@@ -89,8 +100,8 @@ function weightedPick(pool: Candidate[], now: number, random: () => number): Can
 }
 
 /**
- * План дня из задач «можно сейчас»: блок дедлайнов (просроченные и в пределах горизонта) и по одной задаче
- * за каждой из четырех кнопок. Задача в плане встречается один раз; «дофамин» за кнопки не попадает.
+ * План дня: блок дедлайнов (просроченные и в пределах горизонта, в том числе задачи на паузе) и по одной задаче
+ * «можно сейчас» за каждой из четырех кнопок. Задача в плане встречается один раз; «дофамин» за кнопки не попадает.
  */
 export function composePlan(
   candidates: Candidate[],
@@ -106,7 +117,7 @@ export function composePlan(
   const picks: PlanPick[] = deadlines.map((task, position) => ({ slot: "deadline", position, itemId: task.id }));
   const used = new Set(picks.map((pick) => pick.itemId));
   for (const slot of buttonSlots) {
-    const free = candidates.filter((task) => !used.has(task.id) && task.flavor !== "dopamine");
+    const free = candidates.filter((task) => !used.has(task.id) && task.pause === null && task.flavor !== "dopamine");
     if (free.length === 0) break;
     const marked = free.filter((task) => task[slot] === true);
     const task = marked.length > 0 ? weightedPick(marked, now, random) : [...free].sort(byPriority)[0];
@@ -116,18 +127,21 @@ export function composePlan(
   return picks;
 }
 
-export type PlanTask = Omit<PlanRow, "important" | "urgent" | "impactful" | "easy"> & {
+export type PlanTask = Omit<PlanRow, "important" | "urgent" | "impactful" | "easy" | keyof TaskFlags> & {
   priority: number;
   level: PriorityLevel;
+  /** Причина паузы сейчас (для пометки в блоке дедлайнов). */
+  pause: Pause | null;
 };
 export type TodayView = { date: string; deadlines: PlanTask[]; buttons: Partial<Record<ButtonSlot, PlanTask>> };
 
-function view(date: string, plan: PlanRow[]): TodayView {
+function view(date: string, plan: PlanRow[], now: number): TodayView {
   const result: TodayView = { date, deadlines: [], buttons: {} };
   for (const row of plan) {
-    const { important, urgent, impactful, easy, ...rest } = row;
+    const { important, urgent, impactful, easy, deferred, deferredUntil, queued, waitingFor, ...rest } = row;
     const points = priority({ important, urgent, impactful, easy });
-    const task: PlanTask = { ...rest, priority: points, level: priorityLevel(points) };
+    const pause = pauseReason({ deferred, deferredUntil, queued, waitingFor }, now);
+    const task: PlanTask = { ...rest, priority: points, level: priorityLevel(points), pause };
     if (row.slot === "deadline") result.deadlines.push(task);
     else if ((buttonSlots as readonly string[]).includes(row.slot)) result.buttons[row.slot as ButtonSlot] = task;
   }
@@ -140,8 +154,9 @@ export const day = {
   async today(db: Db, user: { id: string; timezone: string }, now: number, random: () => number = Math.random): Promise<TodayView> {
     const date = localDate(now, user.timezone);
     const existing = await loadPlan(db, user.id, date);
-    if (existing.length > 0) return view(date, existing);
-    const picks = composePlan(await nowCandidates(db, user.id, now), date, user.timezone, now, random);
-    return view(date, picks.length > 0 ? await savePlan(db, user.id, date, picks, now) : []);
+    if (existing.length > 0) return view(date, existing, now);
+    const candidates = (await planCandidates(db, user.id, now)).map((task) => ({ ...task, pause: pauseReason(task, now) }));
+    const picks = composePlan(candidates, date, user.timezone, now, random);
+    return view(date, picks.length > 0 ? await savePlan(db, user.id, date, picks, now) : [], now);
   },
 };

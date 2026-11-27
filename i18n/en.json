@@ -62,8 +62,6 @@
   "status.now": "Can do now",
   "status.paused": "Paused",
   "filter.mark": "Mark",
-  "deadline.set": "Set",
-  "deadline.none": "None",
   "sort.by": "Sort by",
   "sort.then": "Then by",
   "sort.priority": "Priority",
@@ -74,5 +72,8 @@
   "level.low": "Low",
   "level.none": "No priority",
   "tasks.nothing": "Nothing found.",
-  "filter.title": "Filters and sorting"
+  "filter.title": "Filters and sorting",
+  "filter.field": "Filter",
+  "filter.notFilled": "Not filled in",
+  "task.owner": "Owner: {name}"
 }

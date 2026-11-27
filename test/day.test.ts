@@ -4,6 +4,7 @@ import {
   addDays,
   composePlan,
   localDate,
+  pauseReason,
   priority,
   priorityLevel,
   taskStatus,
@@ -24,6 +25,7 @@ function candidate(id: string, fields: Partial<Candidate> = {}): Candidate {
     flavor: null,
     deadline: null,
     lastShownAt: null,
+    pause: null,
     ...fields,
   };
 }
@@ -70,6 +72,10 @@ describe("статус задачи", () => {
     expect(taskStatus({ ...free, deferred: true, deferredUntil: now - 1 }, now)).toBe("now");
     expect(taskStatus({ ...free, queued: true }, now)).toBe("paused");
     expect(taskStatus({ ...free, waitingFor: "дочь" }, now)).toBe("paused");
+    expect(pauseReason({ ...free, deferred: true, queued: true }, now)).toBe("deferred");
+    expect(pauseReason({ ...free, queued: true }, now)).toBe("queued");
+    expect(pauseReason({ ...free, waitingFor: "дочь" }, now)).toBe("waiting");
+    expect(pauseReason(free, now)).toBeNull();
   });
 });
 
@@ -137,6 +143,25 @@ describe("состав плана дня", () => {
     ]);
   });
 
+  it("задачи на паузе идут в блок дедлайнов, но не за кнопки", () => {
+    const at = (date: string) => new Date(`${date}T00:00:00Z`).getTime();
+    const plan = composePlan(
+      [
+        candidate("deferred", { important: true, deadline: at("2026-12-01"), pause: "deferred" }),
+        candidate("waiting", { important: true, pause: "waiting" }),
+        candidate("free", { urgent: true }),
+      ],
+      today,
+      tz,
+      now,
+      first,
+    );
+    expect(plan.map((pick) => [pick.slot, pick.itemId])).toEqual([
+      ["deadline", "deferred"],
+      ["important", "free"],
+    ]);
+  });
+
   it("шанс выше у задачи с большим приоритетом, у давно не показанной и у лягушки", () => {
     const pool = [
       candidate("plain", { important: true, lastShownAt: now }),
@@ -182,7 +207,7 @@ async function insertTask(ownerId: string, title: string, fields: TaskFields = {
 
 type Today = {
   date: string;
-  deadlines: { itemId: string; title: string }[];
+  deadlines: { itemId: string; title: string; pause: string | null }[];
   buttons: Record<string, { itemId: string; title: string; priority: number; level: string } | undefined>;
 };
 
@@ -216,6 +241,22 @@ describe("план дня через API", () => {
     expect(rows?.n).toBe(1);
   });
 
+  it("в блоке дедлайнов задачи на паузе с причиной паузы", async () => {
+    const soon = Date.now() + 86_400_000;
+    await insertTask(ann.id, "отложенная со сроком", { deadline: soon, deferred: 1 });
+    await insertTask(ann.id, "в очереди со сроком", { deadline: soon + 1, queued: 1 });
+    await insertTask(ann.id, "жду со сроком", { deadline: soon + 2, waiting_for: "мастер" });
+    await insertTask(ann.id, "можно со сроком", { deadline: soon + 3 });
+    const plan = await today(ann.token);
+    expect(plan.deadlines.map((task) => [task.title, task.pause])).toEqual([
+      ["отложенная со сроком", "deferred"],
+      ["в очереди со сроком", "queued"],
+      ["жду со сроком", "waiting"],
+      ["можно со сроком", null],
+    ]);
+    expect(plan.buttons).toEqual({});
+  });
+
   it("одновременные первые запросы дают один план", async () => {
     for (const mark of ["important", "urgent", "impactful", "easy"]) {
       await insertTask(ann.id, mark, { [mark]: 1, why: "x" });
@@ -239,7 +280,15 @@ describe("план дня через API", () => {
   });
 });
 
-type TaskView = { id: string; title: string; priority: number; level: string; status: string; sphereIds: string[] };
+type TaskView = {
+  id: string;
+  title: string;
+  priority: number;
+  level: string;
+  status: string;
+  sphereIds: string[];
+  ownerName: string | null;
+};
 
 describe("вкладка «Задачи»", () => {
   it("видны свои задачи и поручения автора, с приоритетом и статусом; инбокс и архив не видны", async () => {
@@ -258,7 +307,8 @@ describe("вкладка «Задачи»", () => {
     const byTitle = Object.fromEntries(body.tasks.map((task) => [task.title, task]));
     expect(Object.keys(byTitle).sort()).toEqual(["Bob делает для Ann", "жду ответа", "купить краску"].sort());
     expect(byTitle["купить краску"]).toMatchObject({ priority: 3, level: "medium", status: "now", sphereIds: [sphere] });
-    expect(byTitle["жду ответа"]).toMatchObject({ priority: 0, level: "none", status: "paused" });
+    expect(byTitle["жду ответа"]).toMatchObject({ priority: 0, level: "none", status: "paused", ownerName: null });
+    expect(byTitle["Bob делает для Ann"].ownerName).toBe("Bob");
 
     const bobView = await (await api(bob.token, "GET", "/tasks")).json<{ tasks: TaskView[] }>();
     expect(bobView.tasks.map((task) => task.title).sort()).toEqual(["Bob делает для Ann", "только Bob"].sort());

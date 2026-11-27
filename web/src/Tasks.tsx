@@ -18,12 +18,32 @@ type TaskRow = {
   categoryId: string | null;
   projectId: string | null;
   deadline: number | null;
+  remindAt: number | null;
+  deferred: boolean;
+  deferredUntil: number | null;
+  queued: boolean;
+  waitingFor: string | null;
+  firstStepText: string | null;
   flavor: "dopamine" | "frog" | null;
+  ownerName: string | null;
   priority: number;
   level: Level;
   status: "now" | "paused";
 };
-type SortKey = "priority" | "deadline" | "title" | "created";
+type SortKey =
+  | "priority"
+  | "status"
+  | "deadline"
+  | "remindAt"
+  | "deferredUntil"
+  | "title"
+  | "sphere"
+  | "kind"
+  | "category"
+  | "project"
+  | "flavor"
+  | "created";
+type FieldKey = "deadline" | "remindAt" | "deferred" | "queued" | "waitingFor" | "firstStep";
 type Filters = {
   q: string;
   status: string;
@@ -33,7 +53,8 @@ type Filters = {
   category: string;
   project: string;
   flavor: string;
-  deadline: string;
+  field: FieldKey | "";
+  notFilled: boolean;
 };
 type Props = { language: Language; onSignedOut: () => void };
 
@@ -53,20 +74,72 @@ const levelLabels: Record<Level, TextKey> = {
 };
 const sortLabels: Record<SortKey, TextKey> = {
   priority: "sort.priority",
+  status: "filter.status",
   deadline: "field.deadline",
+  remindAt: "field.remindAt",
+  deferredUntil: "field.deferredUntil",
   title: "field.name",
+  sphere: "field.spheres",
+  kind: "field.kind",
+  category: "field.category",
+  project: "field.project",
+  flavor: "field.flavor",
   created: "sort.created",
 };
-const noFilters: Filters = { q: "", status: "", mark: "", sphere: "", kind: "", category: "", project: "", flavor: "", deadline: "" };
+const fieldLabels: Record<FieldKey, TextKey> = {
+  deadline: "field.deadline",
+  remindAt: "field.remindAt",
+  deferred: "field.deferred",
+  queued: "field.queued",
+  waitingFor: "field.waitingFor",
+  firstStep: "field.firstStep",
+};
+const filled: Record<FieldKey, (task: TaskRow) => boolean> = {
+  deadline: (task) => task.deadline !== null,
+  remindAt: (task) => task.remindAt !== null,
+  deferred: (task) => task.deferred,
+  queued: (task) => task.queued,
+  waitingFor: (task) => task.waitingFor !== null,
+  firstStep: (task) => task.firstStepText !== null,
+};
+const noFilters: Filters = {
+  q: "",
+  status: "",
+  mark: "",
+  sphere: "",
+  kind: "",
+  category: "",
+  project: "",
+  flavor: "",
+  field: "",
+  notFilled: false,
+};
 
 const strong = (task: TaskRow) => (task.important || task.impactful ? 1 : 0);
+/** Пустые значения в конце при любом поле сортировки. */
+const byNumber = (a: number | null, b: number | null) => (a ?? Infinity) - (b ?? Infinity);
+const byText = (a: string | undefined, b: string | undefined) =>
+  a === undefined ? (b === undefined ? 0 : 1) : b === undefined ? -1 : a.localeCompare(b);
 
-const compare: Record<SortKey, (a: TaskRow, b: TaskRow) => number> = {
-  priority: (a, b) => b.priority - a.priority || strong(b) - strong(a),
-  deadline: (a, b) => (a.deadline ?? Infinity) - (b.deadline ?? Infinity),
-  title: (a, b) => a.title.localeCompare(b.title),
-  created: (a, b) => b.createdAt - a.createdAt,
-};
+function comparators(names: Map<string, string>, text: Text): Record<SortKey, (a: TaskRow, b: TaskRow) => number> {
+  const name = (id: string | null) => (id === null ? undefined : names.get(id));
+  const sphere = (task: TaskRow) => task.sphereIds.map((id) => names.get(id) ?? "").sort((a, b) => a.localeCompare(b))[0];
+  const flavor = (task: TaskRow) => (task.flavor === null ? undefined : text(`flavor.${task.flavor}`));
+  return {
+    priority: (a, b) => b.priority - a.priority || strong(b) - strong(a),
+    status: (a, b) => (a.status === b.status ? 0 : a.status === "now" ? -1 : 1),
+    deadline: (a, b) => byNumber(a.deadline, b.deadline),
+    remindAt: (a, b) => byNumber(a.remindAt, b.remindAt),
+    deferredUntil: (a, b) => byNumber(a.deferredUntil, b.deferredUntil),
+    title: (a, b) => a.title.localeCompare(b.title),
+    sphere: (a, b) => byText(sphere(a), sphere(b)),
+    kind: (a, b) => byText(name(a.actionKindId), name(b.actionKindId)),
+    category: (a, b) => byText(name(a.categoryId), name(b.categoryId)),
+    project: (a, b) => byText(name(a.projectId), name(b.projectId)),
+    flavor: (a, b) => byText(flavor(a), flavor(b)),
+    created: (a, b) => b.createdAt - a.createdAt,
+  };
+}
 
 function matches(task: TaskRow, f: Filters): boolean {
   return (
@@ -78,7 +151,7 @@ function matches(task: TaskRow, f: Filters): boolean {
     (!f.category || task.categoryId === f.category) &&
     (!f.project || task.projectId === f.project) &&
     (!f.flavor || task.flavor === f.flavor) &&
-    (!f.deadline || (f.deadline === "set") === (task.deadline !== null))
+    (!f.field || filled[f.field](task) !== f.notFilled)
   );
 }
 
@@ -122,11 +195,15 @@ export function Tasks({ language, onSignedOut }: Props) {
 
   if (!tasks || !lists) return failed ? <p role="alert">{text("error.load")}</p> : null;
 
-  const set = (key: keyof Filters) => (value: string) => setFilters({ ...filters, [key]: value });
+  const set = (key: Exclude<keyof Filters, "notFilled">) => (value: string) => setFilters({ ...filters, [key]: value });
+  const projectNames: NameRow[] = projects.map((project) => ({ id: project.id, name: project.title }));
+  const names = new Map(
+    [...lists.spheres, ...lists.actionKinds, ...lists.categories, ...projectNames].map((row) => [row.id, row.name]),
+  );
+  const compare = comparators(names, text);
   const shown = tasks
     .filter((task) => matches(task, filters))
     .sort((a, b) => compare[sortBy](a, b) || (thenBy ? compare[thenBy](a, b) : 0));
-  const projectNames: NameRow[] = projects.map((project) => ({ id: project.id, name: project.title }));
 
   return (
     <section>
@@ -173,15 +250,20 @@ export function Tasks({ language, onSignedOut }: Props) {
           onChange={set("flavor")}
         />
         <Filter
-          label={text("field.deadline")}
-          value={filters.deadline}
-          options={[
-            { id: "set", name: text("deadline.set") },
-            { id: "none", name: text("deadline.none") },
-          ]}
+          label={text("filter.field")}
+          value={filters.field}
+          options={(Object.keys(fieldLabels) as FieldKey[]).map((key) => ({ id: key, name: text(fieldLabels[key]) }))}
           any={text("filter.any")}
-          onChange={set("deadline")}
+          onChange={set("field")}
         />
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={filters.notFilled}
+            onChange={(event) => setFilters({ ...filters, notFilled: event.target.checked })}
+          />
+          {text("filter.notFilled")}
+        </label>
         <Labeled label={text("sort.by")}>
           <select value={sortBy} onChange={(event) => setSortBy(event.target.value as SortKey)}>
             {(Object.keys(sortLabels) as SortKey[]).map((key) => (
@@ -218,6 +300,7 @@ export function Tasks({ language, onSignedOut }: Props) {
             >
               {task.title}
               <span className={`level level-${task.level}`}>{text(levelLabels[task.level])}</span>
+              {task.ownerName !== null && <span className="owner">{t(language, "task.owner", { name: task.ownerName })}</span>}
             </button>
             {openId === task.id && (
               <CardForm
@@ -225,6 +308,7 @@ export function Tasks({ language, onSignedOut }: Props) {
                 text={text}
                 lists={lists}
                 projects={projects}
+                ownerLabel={task.ownerName === null ? undefined : t(language, "task.owner", { name: task.ownerName })}
                 onSignedOut={onSignedOut}
                 onDelete={() => remove(task.id)}
               />

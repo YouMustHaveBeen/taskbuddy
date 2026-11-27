@@ -177,11 +177,15 @@ export function CardForm(props: {
   text: Text;
   lists: Lists;
   projects: Row[];
+  /** Пометка чужой задачи («Чья задача: имя»). У чужой задачи скрыты сферы, вид, категория и проект: справочники
+   *  у автора свои, а сервер проверяет выбор по справочникам хозяина задачи (до этапа 7). */
+  ownerLabel?: string;
   onSignedOut: () => void;
   onDelete: () => Promise<void>;
   onPromoted?: () => Promise<void>;
 }) {
-  const { id, text, lists, projects, onSignedOut, onDelete, onPromoted } = props;
+  const { id, text, lists, projects, ownerLabel, onSignedOut, onDelete, onPromoted } = props;
+  const own = ownerLabel === undefined;
   const [confirming, setConfirming] = useState(false);
   const [card, setCard] = useState<Card>();
   const [failed, setFailed] = useState(false);
@@ -225,6 +229,7 @@ export function CardForm(props: {
   const inbox = card.kind === "inbox";
   return (
     <div className="card">
+      {!own && <p className="owner">{ownerLabel}</p>}
       {saveFailed && <p role="alert">{text("error.generic")}</p>}
       {inbox && (!type || card.missing.length > 0) && (
         <p className="hint">
@@ -248,41 +253,49 @@ export function CardForm(props: {
         <Check label={text("field.easy")} value={card.easy === true} onChange={(v) => save({ easy: v })} />
       </div>
       <TextField multiline label={text("field.why")} value={card.why ?? ""} onCommit={(v) => save({ why: v })} />
-      <fieldset className="spheres">
-        <legend>{text("field.spheres")}</legend>
-        {lists.spheres.length === 0 && <p className="empty">{text("inbox.noSpheres")}</p>}
-        {lists.spheres.map((sphere) => (
-          <label key={sphere.id}>
-            <input
-              type="checkbox"
-              checked={spheres.includes(sphere.id)}
-              disabled={!spheres.includes(sphere.id) && spheres.length >= defaults.itemMaxSpheres}
-              onChange={(event) => {
-                const next = event.target.checked
-                  ? [...latestSpheres.current, sphere.id]
-                  : latestSpheres.current.filter((other) => other !== sphere.id);
-                latestSpheres.current = next;
-                setSpheres(next);
-                void save({ sphereIds: next }).then((ok) => {
-                  if (ok) return;
-                  latestSpheres.current = card.sphereIds;
-                  setSpheres(card.sphereIds);
-                });
-              }}
-            />
-            {sphere.name}
-          </label>
-        ))}
-      </fieldset>
-      <Choice label={text("field.kind")} value={card.actionKindId} options={lists.actionKinds} onChange={(v) => save({ actionKindId: v })} />
-      <Choice label={text("field.category")} value={card.categoryId} options={lists.categories} onChange={(v) => save({ categoryId: v })} />
+      {own && (
+        <fieldset className="spheres">
+          <legend>{text("field.spheres")}</legend>
+          {lists.spheres.length === 0 && <p className="empty">{text("inbox.noSpheres")}</p>}
+          {lists.spheres.map((sphere) => (
+            <label key={sphere.id}>
+              <input
+                type="checkbox"
+                checked={spheres.includes(sphere.id)}
+                disabled={!spheres.includes(sphere.id) && spheres.length >= defaults.itemMaxSpheres}
+                onChange={(event) => {
+                  const next = event.target.checked
+                    ? [...latestSpheres.current, sphere.id]
+                    : latestSpheres.current.filter((other) => other !== sphere.id);
+                  latestSpheres.current = next;
+                  setSpheres(next);
+                  void save({ sphereIds: next }).then((ok) => {
+                    if (ok) return;
+                    latestSpheres.current = card.sphereIds;
+                    setSpheres(card.sphereIds);
+                  });
+                }}
+              />
+              {sphere.name}
+            </label>
+          ))}
+        </fieldset>
+      )}
+      {own && (
+        <>
+          <Choice label={text("field.kind")} value={card.actionKindId} options={lists.actionKinds} onChange={(v) => save({ actionKindId: v })} />
+          <Choice label={text("field.category")} value={card.categoryId} options={lists.categories} onChange={(v) => save({ categoryId: v })} />
+        </>
+      )}
       <Labeled label={text("field.deadline")}>
         <input type="date" value={dateValue(card.deadline)} onChange={(e) => void save({ deadline: fromDate(e.target.value) })} />
       </Labeled>
       <Labeled label={text("field.remindAt")}>
         <input type="datetime-local" value={dateTimeValue(card.remindAt)} onChange={(e) => void save({ remindAt: fromDateTime(e.target.value) })} />
       </Labeled>
-      <Choice label={text("field.project")} value={card.projectId} options={projectOptions.map((p) => ({ id: p.id, name: p.title }))} onChange={(v) => save({ projectId: v })} />
+      {own && (
+        <Choice label={text("field.project")} value={card.projectId} options={projectOptions.map((p) => ({ id: p.id, name: p.title }))} onChange={(v) => save({ projectId: v })} />
+      )}
       <Check label={text("field.deferred")} value={card.deferred} onChange={(v) => save({ deferred: v })} />
       <Labeled label={text("field.deferredUntil")}>
         <input type="date" value={dateValue(card.deferredUntil)} onChange={(e) => void save({ deferredUntil: fromDate(e.target.value) })} />

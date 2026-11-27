@@ -355,7 +355,8 @@ export async function promoteCard(db: Db, userId: string, id: string, asProject:
   );
 }
 
-export type TaskRow = Card & { createdAt: number };
+/** ownerName: имя хозяина задачи, если это не сам пользователь (задача, которой поделились); иначе null. */
+export type TaskRow = Card & { createdAt: number; ownerName: string | null };
 
 /** Задачи, видимые пользователю (владелица или автор), не в архиве; UNION по индексам items_owner_kind и items_creator. Один batch. */
 export async function listTasks(db: Db, userId: string): Promise<TaskRow[]> {
@@ -364,7 +365,11 @@ export async function listTasks(db: Db, userId: string): Promise<TaskRow[]> {
   const mine = `i.id IN (SELECT id FROM items WHERE owner_id = ?1 AND ${active} UNION SELECT id FROM items WHERE creator_id = ?1 AND ${active})`;
   const [taskRows, sphereRows] = await d1.batch([
     d1
-      .prepare(`SELECT t.*, i.id, i.kind, i.owner_id, i.title, i.created_at FROM items i JOIN tasks t ON t.id = i.id WHERE ${mine}`)
+      .prepare(
+        `SELECT t.*, i.id, i.kind, i.owner_id, i.title, i.created_at,
+          CASE WHEN i.owner_id = ?1 THEN NULL ELSE u.name END AS owner_name
+        FROM items i JOIN tasks t ON t.id = i.id JOIN users u ON u.id = i.owner_id WHERE ${mine}`,
+      )
       .bind(userId),
     d1.prepare(`SELECT s.item_id, s.sphere_id FROM item_spheres s JOIN items i ON i.id = s.item_id WHERE ${mine}`).bind(userId),
   ]);
@@ -372,9 +377,10 @@ export async function listTasks(db: Db, userId: string): Promise<TaskRow[]> {
   for (const row of sphereRows.results as { item_id: string; sphere_id: string }[]) {
     spheresOf.set(row.item_id, [...(spheresOf.get(row.item_id) ?? []), row.sphere_id]);
   }
-  return (taskRows.results as (RawItem & RawTask & { created_at: number })[]).map((row) => ({
+  return (taskRows.results as (RawItem & RawTask & { created_at: number; owner_name: string | null })[]).map((row) => ({
     ...cardFromRaw(row, row, spheresOf.get(row.id) ?? []),
     createdAt: row.created_at,
+    ownerName: row.owner_name,
   }));
 }
 

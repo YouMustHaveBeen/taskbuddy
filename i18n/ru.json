@@ -64,8 +64,6 @@
   "status.now": "Можно сейчас",
   "status.paused": "Пауза",
   "filter.mark": "Отметка",
-  "deadline.set": "Есть",
-  "deadline.none": "Нет",
   "sort.by": "Сортировка",
   "sort.then": "Затем",
   "sort.priority": "Приоритет",
@@ -76,5 +74,8 @@
   "level.low": "Низкий",
   "level.none": "Нет приоритета",
   "tasks.nothing": "Ничего не найдено.",
-  "filter.title": "Фильтры и сортировка"
+  "filter.title": "Фильтры и сортировка",
+  "filter.field": "Фильтр",
+  "filter.notFilled": "Не заполнено",
+  "task.owner": "Чья задача: {name}"
 }

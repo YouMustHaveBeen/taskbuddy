@@ -14,4 +14,6 @@ export const defaults = {
   deadlineHorizonDays: 7,
   pickStaleDaysCap: 14,
   pickFrogBoost: 2,
+  /** Сколько дней хранится план дня; очистка в ночной задаче (этап 2а, часть 3). */
+  dayPlanKeepDays: 30,
 };
