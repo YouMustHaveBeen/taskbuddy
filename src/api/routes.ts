@@ -1,12 +1,13 @@
 import { Hono, type Context } from "hono";
-import { signInByLink, signInByTelegramId, userBySession, type SignedIn } from "../core/auth";
+import { signInByLink, signInByTelegramId, type SignedIn } from "../core/auth";
 import { defaults } from "../core/settings";
 import { createDb } from "../db/client";
 import type { User } from "../db/users";
-import type { Env } from "../env";
 import { verifyInitData } from "../telegram/initData";
+import { referenceRoutes } from "./references";
+import { requireUser, type ApiEnv } from "./session";
 
-export const apiRoutes = new Hono<{ Bindings: Env }>();
+export const apiRoutes = new Hono<ApiEnv>();
 
 apiRoutes.post("/auth/telegram", async (c) => {
   const initData = await bodyField(c, "initData");
@@ -28,12 +29,9 @@ apiRoutes.post("/auth/link", async (c) => {
   return signedIn(c, await signInByLink(createDb(c.env.DB), token, Date.now()));
 });
 
-apiRoutes.get("/me", async (c) => {
-  const token = c.req.header("Authorization")?.replace(/^Bearer /, "") ?? "";
-  const user = token ? await userBySession(createDb(c.env.DB), token, Date.now()) : undefined;
-  if (!user) return c.body(null, 401);
-  return c.json({ user: publicUser(user) });
-});
+apiRoutes.get("/me", requireUser, (c) => c.json({ user: publicUser(c.var.user) }));
+
+apiRoutes.route("/references", referenceRoutes);
 
 async function bodyField(c: Context, name: string): Promise<unknown> {
   const body: unknown = await c.req.json().catch(() => undefined);

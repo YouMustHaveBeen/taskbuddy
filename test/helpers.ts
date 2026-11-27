@@ -2,7 +2,9 @@ import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test"
 import { env } from "cloudflare:workers";
 import { vi } from "vitest";
 import app from "../src/index";
+import { signInByTelegramId } from "../src/core/auth";
 import { toHex } from "../src/core/crypto";
+import { createDb } from "../src/db/client";
 
 export const ORIGIN = "https://taskbuddy.example";
 
@@ -15,7 +17,26 @@ export async function call(path: string, init: RequestInit = {}): Promise<Respon
 
 export async function resetDb(): Promise<void> {
   await env.DB.batch(
-    ["tg_updates", "sessions", "settings", "users", "households"].map((table) =>
+    [
+      "insight_spheres",
+      "insights",
+      "zones",
+      "practices",
+      "routines",
+      "tasks",
+      "item_spheres",
+      "items",
+      "rewards",
+      "category_compat",
+      "categories",
+      "action_kinds",
+      "spheres",
+      "tg_updates",
+      "sessions",
+      "settings",
+      "users",
+      "households",
+    ].map((table) =>
       env.DB.prepare(`DELETE FROM ${table}`),
     ),
   );
@@ -75,4 +96,28 @@ export async function signInitData(fields: Record<string, string>, token = env.T
   const secret = await hmac(new TextEncoder().encode("WebAppData"), token);
   const hash = toHex(await hmac(secret, checkString));
   return new URLSearchParams({ ...fields, hash }).toString();
+}
+
+export async function createUser(telegramId: number, name: string): Promise<{ id: string; token: string }> {
+  const now = Date.now();
+  const householdId = crypto.randomUUID();
+  const id = crypto.randomUUID();
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO households (id, created_at) VALUES (?, ?)").bind(householdId, now),
+    env.DB
+      .prepare(
+        "INSERT INTO users (id, household_id, telegram_id, name, language, timezone, created_at) VALUES (?, ?, ?, ?, 'ru', 'Europe/Dublin', ?)",
+      )
+      .bind(id, householdId, telegramId, name, now),
+  ]);
+  const signedIn = await signInByTelegramId(createDb(env.DB), telegramId, now);
+  return { id, token: signedIn!.token };
+}
+
+export function api(token: string, method: string, path: string, body?: unknown): Promise<Response> {
+  return call(`/api${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
 }

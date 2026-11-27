@@ -4,4 +4,6 @@ export const defaults = {
   loginLinkTtlMinutes: 10,
   initDataMaxAgeMinutes: 60,
   tgUpdateRetentionHours: 24,
+  referenceNameMaxLength: 100,
+  rewardMinutes: 10,
 };
