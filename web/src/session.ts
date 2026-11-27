@@ -39,9 +39,7 @@ export async function signIn(): Promise<PageUser | undefined> {
   const token = localStorage.getItem(STORAGE_KEY);
   if (!token) return undefined;
   const response = await fetch("/api/me", { headers: { Authorization: `Bearer ${token}` } });
-  if (!response.ok) {
-    localStorage.removeItem(STORAGE_KEY);
-    return undefined;
-  }
+  if (response.status === 401) localStorage.removeItem(STORAGE_KEY);
+  if (!response.ok) return undefined;
   return ((await response.json()) as { user: PageUser }).user;
 }

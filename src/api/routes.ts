@@ -9,7 +9,7 @@ import { verifyInitData } from "../telegram/initData";
 export const apiRoutes = new Hono<{ Bindings: Env }>();
 
 apiRoutes.post("/auth/telegram", async (c) => {
-  const { initData } = await c.req.json<{ initData?: unknown }>().catch(() => ({}) as { initData?: unknown });
+  const initData = await bodyField(c, "initData");
   if (typeof initData !== "string") return c.body(null, 401);
   const now = Date.now();
   const telegramId = await verifyInitData(
@@ -23,7 +23,7 @@ apiRoutes.post("/auth/telegram", async (c) => {
 });
 
 apiRoutes.post("/auth/link", async (c) => {
-  const { token } = await c.req.json<{ token?: unknown }>().catch(() => ({}) as { token?: unknown });
+  const token = await bodyField(c, "token");
   if (typeof token !== "string") return c.body(null, 401);
   return signedIn(c, await signInByLink(createDb(c.env.DB), token, Date.now()));
 });
@@ -34,6 +34,11 @@ apiRoutes.get("/me", async (c) => {
   if (!user) return c.body(null, 401);
   return c.json({ user: publicUser(user) });
 });
+
+async function bodyField(c: Context, name: string): Promise<unknown> {
+  const body: unknown = await c.req.json().catch(() => undefined);
+  return typeof body === "object" && body !== null ? (body as Record<string, unknown>)[name] : undefined;
+}
 
 function signedIn(c: Context, result?: SignedIn) {
   if (!result) return c.body(null, 401);

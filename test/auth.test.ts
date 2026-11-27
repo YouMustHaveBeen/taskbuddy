@@ -192,6 +192,13 @@ describe("вход из мини-приложения по initData", () => {
 });
 
 describe("страница без сессии", () => {
+  it("тело null или не JSON при входе отклоняется с 401", async () => {
+    for (const path of ["/api/auth/telegram", "/api/auth/link"]) {
+      expect((await call(path, { method: "POST", body: "null" })).status).toBe(401);
+      expect((await call(path, { method: "POST", body: "not json" })).status).toBe(401);
+    }
+  });
+
   it("/api/me без токена и с чужим токеном отвечает 401", async () => {
     expect((await call("/api/me")).status).toBe(401);
     const forged = { headers: { Authorization: "Bearer forged" } };
