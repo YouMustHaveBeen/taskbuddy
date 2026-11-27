@@ -1,0 +1,11 @@
+{
+  "bot.start.welcome": "Hi! TaskBuddy is connected.",
+  "bot.start.private": "This is a private bot. An invite code is required.",
+  "bot.web.link": {
+    "one": "Sign-in link, valid for {count} minute:",
+    "other": "Sign-in link, valid for {count} minutes:"
+  },
+  "bot.menuButton": "TaskBuddy",
+  "web.signedIn": "Signed in: {name}",
+  "web.openFromBot": "Open this page from the bot."
+}
