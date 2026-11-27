@@ -2,7 +2,7 @@ import { StrictMode, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { pickLanguage, t, type Language } from "../../i18n";
 import { References } from "./References";
-import { signIn, type PageUser } from "./session";
+import { forgetSession, signIn, type PageUser } from "./session";
 
 function App() {
   const [state, setState] = useState<{ user?: PageUser } | undefined>();
@@ -13,7 +13,10 @@ function App() {
       .then((user) => setState({ user }));
   }, []);
 
-  const signedOut = useCallback(() => setState({}), []);
+  const signedOut = useCallback(() => {
+    forgetSession();
+    setState({});
+  }, []);
 
   if (!state) return null;
   if (!state.user) return <p>{t(pickLanguage(navigator.language), "web.openFromBot")}</p>;

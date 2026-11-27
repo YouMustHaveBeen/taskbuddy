@@ -24,6 +24,14 @@ async function post(path: string, body: unknown): Promise<PageUser | undefined> 
   return result.user;
 }
 
+export function forgetSession(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // storage unavailable
+  }
+}
+
 export async function signIn(): Promise<PageUser | undefined> {
   const initData = telegramInitData();
   if (initData) return post("/api/auth/telegram", { initData });
