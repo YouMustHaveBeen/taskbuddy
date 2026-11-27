@@ -26,7 +26,6 @@
   "error.invalid": "Check the value you entered.",
   "error.generic": "Couldn't save. Try again.",
   "error.load": "Couldn't load. Refresh the page.",
-  "bot.inbox.saved": "✅",
   "tab.inbox": "Inbox",
   "action.new": "New entry",
   "action.open": "Open",

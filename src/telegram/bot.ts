@@ -55,7 +55,7 @@ export async function createBot(env: Env, db: Db, origin: string): Promise<Bot> 
       return;
     }
     const { outcome } = await items.addInbox(db, user.id, ctx.message.text, "bot");
-    if (outcome === "ok") await ctx.reply(t(user.language as Language, "bot.inbox.saved"));
+    if (outcome === "ok") await ctx.react("👍");
   });
 
   return bot;

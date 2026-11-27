@@ -50,12 +50,13 @@ async function inboxTitles(token: string): Promise<string[]> {
 const marks = { important: false, urgent: true, impactful: false, easy: true };
 
 describe("бот: запись в инбокс", () => {
-  it("текст попадает в инбокс, бот отвечает галочкой", async () => {
+  it("текст попадает в инбокс, бот ставит лайк на сообщение", async () => {
     const calls = mockTelegram();
     const owner = ann;
     await sendUpdate("позвонить маме");
-    const sent = calls.filter((call) => call.method === "sendMessage");
-    expect(sent.map((call) => call.payload.text)).toEqual(["✅"]);
+    expect(calls.filter((call) => call.method === "sendMessage")).toEqual([]);
+    const reactions = calls.filter((call) => call.method === "setMessageReaction");
+    expect(reactions.map((call) => call.payload.reaction)).toEqual([[{ type: "emoji", emoji: "👍" }]]);
     expect(await inboxTitles(owner.token)).toEqual(["позвонить маме"]);
     const row = await env.DB.prepare("SELECT source, owner_id, creator_id FROM items").first<{
       source: string;
