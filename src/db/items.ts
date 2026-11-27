@@ -355,6 +355,29 @@ export async function promoteCard(db: Db, userId: string, id: string, asProject:
   );
 }
 
+export type TaskRow = Card & { createdAt: number };
+
+/** Задачи, видимые пользователю (владелица или автор), не в архиве; UNION по индексам items_owner_kind и items_creator. Один batch. */
+export async function listTasks(db: Db, userId: string): Promise<TaskRow[]> {
+  const d1 = db.$client;
+  const active = "kind = 'task' AND archived_at IS NULL";
+  const mine = `i.id IN (SELECT id FROM items WHERE owner_id = ?1 AND ${active} UNION SELECT id FROM items WHERE creator_id = ?1 AND ${active})`;
+  const [taskRows, sphereRows] = await d1.batch([
+    d1
+      .prepare(`SELECT t.*, i.id, i.kind, i.owner_id, i.title, i.created_at FROM items i JOIN tasks t ON t.id = i.id WHERE ${mine}`)
+      .bind(userId),
+    d1.prepare(`SELECT s.item_id, s.sphere_id FROM item_spheres s JOIN items i ON i.id = s.item_id WHERE ${mine}`).bind(userId),
+  ]);
+  const spheresOf = new Map<string, string[]>();
+  for (const row of sphereRows.results as { item_id: string; sphere_id: string }[]) {
+    spheresOf.set(row.item_id, [...(spheresOf.get(row.item_id) ?? []), row.sphere_id]);
+  }
+  return (taskRows.results as (RawItem & RawTask & { created_at: number })[]).map((row) => ({
+    ...cardFromRaw(row, row, spheresOf.get(row.id) ?? []),
+    createdAt: row.created_at,
+  }));
+}
+
 export async function archiveItem(
   db: Db,
   userId: string,

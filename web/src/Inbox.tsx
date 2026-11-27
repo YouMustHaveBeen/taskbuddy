@@ -3,9 +3,9 @@ import { t, type Language, type TextKey } from "../../i18n";
 import { defaults } from "../../src/core/settings";
 import { api } from "./api";
 
-type Row = { id: string; title: string };
-type NameRow = { id: string; name: string };
-type Lists = { spheres: NameRow[]; actionKinds: NameRow[]; categories: NameRow[] };
+export type Row = { id: string; title: string };
+export type NameRow = { id: string; name: string };
+export type Lists = { spheres: NameRow[]; actionKinds: NameRow[]; categories: NameRow[] };
 const missingLabels: Record<string, "field.type" | "field.why" | "field.spheres" | "field.kind"> = {
   type: "field.type",
   why: "field.why",
@@ -38,7 +38,7 @@ type Card = {
   firstStepText: string | null;
 };
 type Save = (patch: Record<string, unknown>) => Promise<boolean>;
-type Text = (key: TextKey) => string;
+export type Text = (key: TextKey) => string;
 type Props = { language: Language; onSignedOut: () => void };
 
 const two = (n: number) => String(n).padStart(2, "0");
@@ -172,14 +172,14 @@ export function Inbox({ language, onSignedOut }: Props) {
   );
 }
 
-function CardForm(props: {
+export function CardForm(props: {
   id: string;
   text: Text;
   lists: Lists;
   projects: Row[];
   onSignedOut: () => void;
   onDelete: () => Promise<void>;
-  onPromoted: () => Promise<void>;
+  onPromoted?: () => Promise<void>;
 }) {
   const { id, text, lists, projects, onSignedOut, onDelete, onPromoted } = props;
   const [confirming, setConfirming] = useState(false);
@@ -214,7 +214,7 @@ function CardForm(props: {
     if (!type) return;
     const result = await api<{ card: Card }>("POST", `/items/${id}/promote`, { type });
     if (result.status === 401) onSignedOut();
-    if (result.data) await onPromoted();
+    if (result.data) await onPromoted?.();
     else if (result.status === 409) await save({});
     else setSaveFailed(true);
   };
@@ -222,21 +222,24 @@ function CardForm(props: {
   if (!card) return failed ? <p role="alert">{text("error.load")}</p> : null;
   const projectOptions = projects.filter((project) => project.id !== id);
 
+  const inbox = card.kind === "inbox";
   return (
     <div className="card">
       {saveFailed && <p role="alert">{text("error.generic")}</p>}
-      {(!type || card.missing.length > 0) && (
+      {inbox && (!type || card.missing.length > 0) && (
         <p className="hint">
           {text("card.missing")} {[...(type ? [] : ["type"]), ...card.missing].map((field) => text(missingLabels[field]).toLowerCase().replace(/\?$/, "")).join(", ")}
         </p>
       )}
-      <Labeled label={text("field.type")}>
-        <select value={type} onChange={(e) => setType(e.target.value as "task" | "project" | "")}>
-          <option value="" />
-          <option value="task">{text("type.task")}</option>
-          <option value="project">{text("type.project")}</option>
-        </select>
-      </Labeled>
+      {inbox && (
+        <Labeled label={text("field.type")}>
+          <select value={type} onChange={(e) => setType(e.target.value as "task" | "project" | "")}>
+            <option value="" />
+            <option value="task">{text("type.task")}</option>
+            <option value="project">{text("type.project")}</option>
+          </select>
+        </Labeled>
+      )}
       <TextField multiline label={text("field.name")} value={card.title} onCommit={(v) => save({ title: v })} />
       <div className="marks">
         <Check label={text("field.important")} value={card.important === true} onChange={(v) => save({ important: v })} />
@@ -294,9 +297,11 @@ function CardForm(props: {
         </select>
       </Labeled>
       <TextField multiline label={text("field.firstStep")} value={card.firstStepText ?? ""} onCommit={(v) => save({ firstStepText: v })} />
-      <button type="button" className="primary" disabled={!type || card.missing.length > 0} onClick={() => void promote()}>
-        {text("action.add")}
-      </button>
+      {inbox && (
+        <button type="button" className="primary" disabled={!type || card.missing.length > 0} onClick={() => void promote()}>
+          {text("action.add")}
+        </button>
+      )}
       <div className="danger-zone">
         {confirming ? (
           <>
@@ -318,7 +323,7 @@ function CardForm(props: {
   );
 }
 
-function Labeled(props: { label: string; children: ReactNode }) {
+export function Labeled(props: { label: string; children: ReactNode }) {
   return (
     <label className="field">
       <span>{props.label}</span>

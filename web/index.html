@@ -57,6 +57,12 @@
       .row-title { display: block; width: 100%; text-align: left; border: 0; border-radius: 0; background: transparent; padding: 14px; }
       .card { padding: 4px 14px 14px; border-top: 1px solid var(--line); background: var(--soft); }
       .hint { opacity: 0.7; font-size: 14px; }
+      .filters-box { margin: 12px 0; }
+      .filters-box > summary { cursor: pointer; padding: 8px 0; }
+      .filters { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0 12px; }
+      .filters .field select { width: 100%; }
+      .row-title .level { float: right; font-size: 13px; opacity: 0.7; margin-left: 8px; }
+      .row-title .level-top, .row-title .level-high { opacity: 1; color: var(--accent); font-weight: 600; }
       .field { display: block; margin: 12px 0; }
       .field > span { display: block; font-size: 14px; opacity: 0.7; margin-bottom: 4px; }
       .marks { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 12px 0; }
