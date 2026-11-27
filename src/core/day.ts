@@ -234,15 +234,32 @@ async function usable(db: Db, userId: string, now: number, used: Set<string>, pi
   return pick(candidates.filter((task) => !used.has(task.id)));
 }
 
+/**
+ * План дня на дату: читается, а если его еще нет, составляется и записывается (без задачи `exclude`).
+ * Пустой план не записывается.
+ */
+async function planOfDay(
+  db: Db,
+  user: DayUser,
+  date: string,
+  now: number,
+  random: () => number,
+  exclude?: string,
+): Promise<PlanRow[]> {
+  const existing = await loadPlan(db, user.id, date);
+  if (existing.length > 0) return existing;
+  const candidates = (await planCandidates(db, user.id, now))
+    .filter((task) => task.id !== exclude)
+    .map((task) => ({ ...task, pause: pauseReason(task, now) }));
+  const picks = composePlan(candidates, date, user.timezone, now, random);
+  return picks.length > 0 ? savePlan(db, user.id, date, picks, now) : [];
+}
+
 export const day = {
   /** План дня пользователя: читается, а если его еще нет, составляется и записывается; за день не пересчитывается. */
   async today(db: Db, user: DayUser, now: number, random: () => number = Math.random): Promise<TodayView> {
     const date = localDate(now, user.timezone);
-    const existing = await loadPlan(db, user.id, date);
-    if (existing.length > 0) return view(date, existing, now);
-    const candidates = (await planCandidates(db, user.id, now)).map((task) => ({ ...task, pause: pauseReason(task, now) }));
-    const picks = composePlan(candidates, date, user.timezone, now, random);
-    return view(date, picks.length > 0 ? await savePlan(db, user.id, date, picks, now) : [], now);
+    return view(date, await planOfDay(db, user, date, now, random), now);
   },
 
   /**
@@ -330,15 +347,11 @@ export const day = {
   async pick(db: Db, user: DayUser, now: number, itemId: unknown): Promise<DayResult> {
     if (typeof itemId !== "string" || itemId === "") return { outcome: "invalid" };
     const date = localDate(now, user.timezone);
-    // пустой план: сначала составляется план дня, чтобы выбранная задача не помешала заполнить кнопки
-    let plan = await loadPlan(db, user.id, date);
-    if (plan.length === 0) {
-      await day.today(db, user, now);
-      plan = await loadPlan(db, user.id, date);
-    }
-    // задача, которая сегодня уже была в плане (в любом состоянии, в том числе после отказа), второй раз не берется
+    // пустой план составляется без выбранной задачи
+    const plan = await planOfDay(db, user, date, now, Math.random, itemId);
     if (plan.some((row) => row.itemId === itemId)) return { outcome: "invalid" };
     const written = await addPickedRow(db, user.id, date, itemId, now);
-    return written.changed > 0 ? { outcome: "ok", today: view(date, written.plan, now) } : { outcome: "not_found" };
+    if (written.changed > 0) return { outcome: "ok", today: view(date, written.plan, now) };
+    return { outcome: written.plan.some((row) => row.itemId === itemId) ? "invalid" : "not_found" };
   },
 };
