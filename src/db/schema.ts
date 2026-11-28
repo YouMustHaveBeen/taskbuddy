@@ -290,13 +290,28 @@ export const dayPlan = sqliteTable(
   (t) => [primaryKey({ columns: [t.userId, t.date, t.slot, t.position] }), index("day_plan_item").on(t.itemId)],
 );
 
+/** Награды списка на сегодня: какая награда выбрана на место `position` (0 — перед первой задачей списка). */
+export const dayRewards = sqliteTable(
+  "day_rewards",
+  {
+    userId: userRef(),
+    date: text("date").notNull(),
+    position: integer("position").notNull(),
+    rewardId: text("reward_id")
+      .notNull()
+      .references(() => rewards.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.date, t.position] }), index("day_rewards_reward").on(t.rewardId)],
+);
+
 export const botPrompts = sqliteTable(
   "bot_prompts",
   {
     userId: userRef(),
     messageId: integer("message_id").notNull(),
     cardMessageId: integer("card_message_id").notNull(),
-    kind: text("kind", { enum: ["reason", "blocks", "survey", "return", "park"] }).notNull(),
+    kind: text("kind", { enum: ["reason", "blocks", "survey", "return", "park", "first_step"] }).notNull(),
     date: text("date").notNull(),
     slot: text("slot").notNull(),
     position: integer("position").notNull(),

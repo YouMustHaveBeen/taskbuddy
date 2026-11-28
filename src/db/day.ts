@@ -72,6 +72,8 @@ export type PlanRow = TaskFlags & {
   why: string | null;
   flavor: "dopamine" | "frog" | null;
   firstStepText: string | null;
+  /** У задачи есть голосовой первый шаг (записан в боте). */
+  hasVoice: boolean;
   deadline: number | null;
   /** Дата последней неудачи задачи (отказ, «На завтра», «В хранилище»). */
   lastFailOn: string | null;
@@ -95,6 +97,7 @@ type PlanRaw = Flags & {
   why: string | null;
   flavor: "dopamine" | "frog" | null;
   first_step_text: string | null;
+  has_voice: number | null;
   deadline: number | null;
   last_fail_on: string | null;
   archived_at: number | null;
@@ -105,7 +108,7 @@ type PlanRaw = Flags & {
  * Первичный ключ day_plan (user_id, date, …) по диапазону дат; задача по первичному ключу.
  */
 const planSql = `SELECT d.date, d.slot, d.position, d.item_id, d.state, d.hidden, d.replacements, i.title,
-    t.important, t.urgent, t.impactful, t.easy, t.why, t.flavor, t.first_step_text, t.deadline,
+    t.important, t.urgent, t.impactful, t.easy, t.why, t.flavor, t.first_step_text, t.first_step_voice_id IS NOT NULL AS has_voice, t.deadline,
     t.deferred, t.deferred_until, t.queued, t.waiting_for, t.last_fail_on, i.archived_at
   FROM day_plan d
   JOIN items i ON i.id = d.item_id
@@ -130,6 +133,7 @@ function planFromRaw(rows: PlanRaw[]): PlanRow[] {
     why: row.why,
     flavor: row.flavor,
     firstStepText: row.first_step_text,
+    hasVoice: row.has_voice === 1,
     deadline: row.deadline,
     lastFailOn: row.last_fail_on,
     archived: row.archived_at !== null,
@@ -137,9 +141,69 @@ function planFromRaw(rows: PlanRaw[]): PlanRow[] {
   }));
 }
 
-export async function loadPlan(db: Db, userId: string, date: string): Promise<PlanRow[]> {
-  const { results } = await db.$client.prepare(planSql).bind(userId, date).all<PlanRaw>();
-  return planFromRaw(results);
+/** Награда пользователя из «Справочников»; `position` — место в списке на сегодня, на которое она выбрана (или null). */
+export type DayReward = { id: string; title: string; minutes: number; position: number | null };
+
+/**
+ * Награды пользователя (индекс rewards_user) и места в списке на дату, на которые они выбраны (первичный ключ
+ * day_rewards по user_id и date). Награда, выбранная на несколько мест, приходит несколько раз.
+ */
+const rewardsSql = `SELECT r.id, r.title, r.minutes, d.position
+  FROM rewards r
+  LEFT JOIN day_rewards d ON d.user_id = r.user_id AND d.date = ?2 AND d.reward_id = r.id
+  WHERE r.user_id = ?1`;
+
+/** План дня (см. planSql) и награды пользователя с местами в списке на сегодня. */
+export type DayData = { plan: PlanRow[]; rewards: DayReward[] };
+
+const read = (d1: D1Database, userId: string, date: string) => [
+  d1.prepare(planSql).bind(userId, date),
+  d1.prepare(rewardsSql).bind(userId, date),
+];
+
+function fromResults(results: D1Result[]): DayData {
+  const [plan, rewards] = results.slice(-2);
+  return { plan: planFromRaw(plan.results as PlanRaw[]), rewards: rewards.results as DayReward[] };
+}
+
+export async function loadPlan(db: Db, userId: string, date: string): Promise<DayData> {
+  return fromResults(await db.$client.batch(read(db.$client, userId, date)));
+}
+
+/** Выбирает награду `rewardId` своей владелицы на место `position` списка на сегодня, если место еще свободно; читает награды заново. */
+export async function saveDayReward(db: Db, userId: string, date: string, position: number, rewardId: string, now: number): Promise<DayReward[]> {
+  const d1 = db.$client;
+  const [, rewards] = await d1.batch([
+    d1
+      .prepare(
+        `INSERT OR IGNORE INTO day_rewards (user_id, date, position, reward_id, created_at)
+        SELECT ?1, ?2, ?3, id, ?5 FROM rewards WHERE id = ?4 AND user_id = ?1`,
+      )
+      .bind(userId, date, position, rewardId, now),
+    d1.prepare(rewardsSql).bind(userId, date),
+  ]);
+  return rewards.results as DayReward[];
+}
+
+/** Голосовой первый шаг задачи своей владелицы (file_id Telegram); первичные ключи tasks и items. */
+export async function firstStepVoice(db: Db, userId: string, itemId: string): Promise<string | undefined> {
+  const row = await db.$client
+    .prepare("SELECT t.first_step_voice_id FROM tasks t JOIN items i ON i.id = t.id WHERE t.id = ? AND i.owner_id = ?")
+    .bind(itemId, userId)
+    .first<{ first_step_voice_id: string | null }>();
+  return row?.first_step_voice_id ?? undefined;
+}
+
+/** Записывает (или заменяет) голосовой первый шаг задачи своей владелицы; возвращает, записан ли он. */
+export async function setFirstStepVoice(db: Db, userId: string, itemId: string, fileId: string): Promise<boolean> {
+  const result = await db.$client
+    .prepare(
+      `UPDATE tasks SET first_step_voice_id = ?
+      WHERE id = ? AND id IN (SELECT id FROM items WHERE id = ? AND owner_id = ? AND archived_at IS NULL)`,
+    )
+    .bind(fileId, itemId, itemId, userId)
+    .run();
+  return result.meta.changes > 0;
 }
 
 const buttonSlotNames = ["important", "urgent", "impactful", "easy"];
@@ -148,9 +212,9 @@ const buttonSlotNames = ["important", "urgent", "impactful", "easy"];
  * Записывает план дня и читает его в том же batch. Если план на эту дату уже записан другим запросом,
  * INSERT OR IGNORE оставляет первый, и читается он. Строки кнопок скрыты, пока пользователь не нажал кнопку.
  */
-export async function savePlan(db: Db, userId: string, date: string, picks: PlanPick[], now: number): Promise<PlanRow[]> {
+export async function savePlan(db: Db, userId: string, date: string, picks: PlanPick[], now: number): Promise<DayData> {
   const d1 = db.$client;
-  // QUERY BUDGET EXCEPTION: по одной вставке на строку плана (дедлайны и четыре кнопки) и чтение плана — один batch
+  // QUERY BUDGET EXCEPTION: по одной вставке на строку плана (дедлайны и четыре кнопки), чтение плана и наград — один batch
   const results = await d1.batch([
     ...picks.map((pick) =>
       d1
@@ -159,9 +223,9 @@ export async function savePlan(db: Db, userId: string, date: string, picks: Plan
         )
         .bind(userId, date, pick.slot, pick.position, pick.itemId, buttonSlotNames.includes(pick.slot) ? 1 : 0, now),
     ),
-    d1.prepare(planSql).bind(userId, date),
+    ...read(d1, userId, date),
   ]);
-  return planFromRaw(results[results.length - 1].results as PlanRaw[]);
+  return fromResults(results);
 }
 
 /** Строка плана: user_id, date, slot, position. */
@@ -169,7 +233,7 @@ export type PlanKey = { userId: string; date: string; slot: PlanSlot; position: 
 const keyWhere = "user_id = ? AND date = ? AND slot = ? AND position = ?";
 const keyArgs = (key: PlanKey) => [key.userId, key.date, key.slot, key.position];
 
-export type PlanWrite = { changed: number; plan: PlanRow[] };
+export type PlanWrite = DayData & { changed: number };
 
 /**
  * Выполняет записи одним batch и читает план. `changed` — число строк, измененных записью-проверкой с номером
@@ -184,14 +248,11 @@ async function write(
   guard = 0,
   timerOf?: PlanKey,
 ): Promise<PlanWrite> {
-  // QUERY BUDGET EXCEPTION: записи действия и чтение плана — один batch
+  // QUERY BUDGET EXCEPTION: записи действия, чтение плана и наград — один batch
   const d1 = db.$client;
   const drop = timerOf ? [dropTimerStatement(db, timerOf)] : [];
-  const results = await d1.batch([...statements, ...drop, d1.prepare(planSql).bind(key.userId, key.date)]);
-  return {
-    changed: results[guard].meta.changes,
-    plan: planFromRaw(results[results.length - 1].results as PlanRaw[]),
-  };
+  const results = await d1.batch([...statements, ...drop, ...read(d1, key.userId, key.date)]);
+  return { changed: results[guard].meta.changes, ...fromResults(results) };
 }
 
 /** Снимает таймер задачи строки плана, если строка больше не ждет работы (выполнена, возвращена, закрыта, ответ опроса). */

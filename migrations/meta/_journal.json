@@ -43,6 +43,13 @@
       "when": 1795875382387,
       "tag": "0005_timers",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1795878966406,
+      "tag": "0006_day_rewards",
+      "breakpoints": true
     }
   ]
 }

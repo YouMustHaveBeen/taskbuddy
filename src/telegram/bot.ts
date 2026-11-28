@@ -6,7 +6,7 @@ import type { Db } from "../db/client";
 import { findUserByTelegramId } from "../db/users";
 import type { Env } from "../env";
 import { timerAlarms } from "../jobs/timerAlarm";
-import { onCallback, onReply, sendLoginLink } from "./day";
+import { onCallback, onReply, onVoice, sendLoginLink } from "./day";
 
 let botInfo: Bot["botInfo"] | undefined;
 
@@ -72,6 +72,21 @@ export async function createBot(env: Env, db: Db, origin: string): Promise<Bot> 
     }
     const { outcome } = await items.addInbox(db, user.id, ctx.message.text, "bot");
     if (outcome === "ok") await ctx.react("👍");
+  });
+
+  chat.on("message:voice", async (ctx) => {
+    const user = await findUserByTelegramId(db, ctx.from.id);
+    if (!user) {
+      await ctx.reply(t(pickLanguage(ctx.from.language_code), "bot.start.private"));
+      return;
+    }
+    const replyTo = ctx.message.reply_to_message;
+    const tg = { api: ctx.api, db, user, url: origin, alarm };
+    if (replyTo?.from?.id === ctx.me.id && (await onVoice(tg, replyTo.message_id, ctx.message.voice.file_id))) {
+      await ctx.react("👍");
+      return;
+    }
+    await ctx.reply(t(user.language as Language, "bot.voice.only"));
   });
 
   return bot;

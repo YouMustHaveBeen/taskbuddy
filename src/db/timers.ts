@@ -29,11 +29,16 @@ type TimerRaw = {
   bot_message_id: number | null;
 };
 
-/** Таймер пользователя с названием записи; записи в архиве таймера не имеют. Первичный ключ timers и items. */
-const timerSql = `SELECT t.kind, t.item_id, i.title, t.minutes, t.started_at, t.paused_at, t.remaining_sec, t.ends_at,
-    t.started_in, t.bot_message_id
-  FROM timers t JOIN items i ON i.id = t.item_id
-  WHERE t.user_id = ? AND i.owner_id = t.user_id AND i.archived_at IS NULL`;
+/**
+ * Таймер пользователя с названием задачи или награды; у задачи в архиве и удаленной награды таймера нет.
+ * Первичные ключи timers, items и rewards.
+ */
+const timerSql = `SELECT t.kind, t.item_id, COALESCE(i.title, r.title) AS title, t.minutes, t.started_at, t.paused_at,
+    t.remaining_sec, t.ends_at, t.started_in, t.bot_message_id
+  FROM timers t
+  LEFT JOIN items i ON t.kind = 'task' AND i.id = t.item_id AND i.owner_id = t.user_id AND i.archived_at IS NULL
+  LEFT JOIN rewards r ON t.kind = 'reward' AND r.id = t.item_id AND r.user_id = t.user_id
+  WHERE t.user_id = ? AND (i.id IS NOT NULL OR r.id IS NOT NULL)`;
 
 function fromRaw(row: TimerRaw | undefined | null): TimerRow | undefined {
   if (!row) return undefined;
@@ -64,14 +69,24 @@ async function write(db: Db, userId: string, statement: D1PreparedStatement): Pr
   return { changed: written.meta.changes, timer: fromRaw((read.results as TimerRaw[])[0]) };
 }
 
-/** Таймер не идет и не на паузе (остановлен, время вышло, даже если будильник еще не сработал) или его запись уже в архиве; ?5 — сейчас. */
+/**
+ * Таймер не идет и не на паузе (остановлен, время вышло, даже если будильник еще не сработал), его задача уже
+ * в архиве или награда удалена; ?5 — сейчас.
+ */
 const idle = `(timers.ends_at IS NULL AND timers.paused_at IS NULL) OR timers.ends_at <= ?5
-  OR NOT EXISTS (SELECT 1 FROM items WHERE items.id = timers.item_id AND items.archived_at IS NULL)`;
+  OR (timers.kind = 'task' AND NOT EXISTS (SELECT 1 FROM items WHERE items.id = timers.item_id AND items.archived_at IS NULL))
+  OR (timers.kind = 'reward' AND NOT EXISTS (SELECT 1 FROM rewards WHERE rewards.id = timers.item_id))`;
 
-/** Запускает таймер записи `itemId` своей владелицы; идущий или стоящий на паузе таймер не заменяется. */
+/** Откуда берется запись таймера: задача своей владелицы не в архиве или награда пользователя. */
+const sources: Record<"task" | "reward", string> = {
+  task: "FROM items WHERE id = ?3 AND owner_id = ?1 AND archived_at IS NULL",
+  reward: "FROM rewards WHERE id = ?3 AND user_id = ?1",
+};
+
+/** Запускает таймер задачи или награды `itemId` пользователя; идущий или стоящий на паузе таймер не заменяется. */
 export function startTimer(
   db: Db,
-  start: { userId: string; kind: TimerKind; itemId: string; minutes: number; startedIn: TimerPlace; botMessageId: number | null },
+  start: { userId: string; kind: "task" | "reward"; itemId: string; minutes: number; startedIn: TimerPlace; botMessageId: number | null },
   now: number,
 ): Promise<TimerWrite> {
   const { userId, kind, itemId, minutes, startedIn, botMessageId } = start;
@@ -81,7 +96,7 @@ export function startTimer(
     db.$client
       .prepare(
         `INSERT INTO timers (user_id, kind, item_id, minutes, started_at, paused_at, remaining_sec, ends_at, started_in, bot_message_id)
-        SELECT ?1, ?2, ?3, ?4, ?5, NULL, NULL, ?6, ?7, ?8 FROM items WHERE id = ?3 AND owner_id = ?1 AND archived_at IS NULL
+        SELECT ?1, ?2, ?3, ?4, ?5, NULL, NULL, ?6, ?7, ?8 ${sources[kind]}
         ON CONFLICT (user_id) DO UPDATE SET kind = excluded.kind, item_id = excluded.item_id, minutes = excluded.minutes,
           started_at = excluded.started_at, paused_at = NULL, remaining_sec = NULL, ends_at = excluded.ends_at,
           started_in = excluded.started_in, bot_message_id = excluded.bot_message_id

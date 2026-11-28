@@ -141,15 +141,16 @@ export async function deadlinesBetween(db: Db, userId: string, from: number, to:
 }
 
 /**
- * Ночная очистка одним batch: планы дня раньше `planBefore` (первичный ключ day_plan по диапазону дат),
+ * Ночная очистка одним batch: планы дня и награды списка раньше `planBefore` (первичные ключи day_plan и day_rewards по диапазону дат),
  * истекшие «отложено до» задач владелицы (индекс items_owner_kind) и вопросы бота старше `promptsBefore`
  * (первичный ключ bot_prompts по user_id). Возвращает сообщения удаленных вопросов, чтобы убрать их из чата.
  */
 export async function nightCleanup(db: Db, userId: string, planBefore: string, promptsBefore: number, now: number): Promise<number[]> {
   const d1 = db.$client;
-  // QUERY BUDGET EXCEPTION: три очистки — один batch раз в сутки
+  // QUERY BUDGET EXCEPTION: четыре очистки — один batch раз в сутки
   const results = await d1.batch([
     d1.prepare("DELETE FROM day_plan WHERE user_id = ? AND date < ?").bind(userId, planBefore),
+    d1.prepare("DELETE FROM day_rewards WHERE user_id = ? AND date < ?").bind(userId, planBefore),
     d1
       .prepare(
         `UPDATE tasks SET deferred = 0, deferred_until = NULL
@@ -159,5 +160,5 @@ export async function nightCleanup(db: Db, userId: string, planBefore: string, p
       .bind(now, userId),
     d1.prepare("DELETE FROM bot_prompts WHERE user_id = ? AND created_at < ? RETURNING message_id").bind(userId, promptsBefore),
   ]);
-  return (results[2].results as { message_id: number }[]).map((row) => row.message_id);
+  return (results[3].results as { message_id: number }[]).map((row) => row.message_id);
 }

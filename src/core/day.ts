@@ -6,14 +6,19 @@ import {
   addPickedRow,
   answerSurvey,
   completeRow,
+  firstStepVoice,
+  setFirstStepVoice,
   finishRefusal,
   returnRow,
   loadPlan,
   planCandidates,
   revealRow,
+  saveDayReward,
   saveRefusalNote,
   savePlan,
   setRowState,
+  type DayData,
+  type DayReward,
   type PlanRow,
   type PlanState,
   type SurveyAnswer,
@@ -184,6 +189,19 @@ export type PlanTask = Omit<
   /** Спрашивать ли «Что мешает?» при неудаче (отказ, «На завтра», «В хранилище»): не чаще раза на задачу в день. */
   askBlocks: boolean;
 };
+/**
+ * Награда списка на сегодня на месте `position` (0 — перед первой задачей, N — после последней). Открыта награда
+ * сразу после сделанных задач; у прошедших (`past`) и открытой есть название, у следующих нет (скрыты).
+ * Прошедшее место без награды (наград тогда не было или награду удалили) не показывается.
+ */
+export type ListReward = {
+  position: number;
+  open: boolean;
+  past: boolean;
+  rewardId: string | null;
+  title: string | null;
+  minutes: number | null;
+};
 export type TodayView = {
   date: string;
   deadlines: PlanTask[];
@@ -191,8 +209,10 @@ export type TodayView = {
   buttons: Partial<Record<ButtonSlot, PlanTask>>;
   /** Задачи, взятые через «Выбрать», перенесенные опросом «На завтра» и задачи «Подумай, почему откладываешь». */
   picked: PlanTask[];
-  /** Список на сегодня: принятые и выполненные задачи дня (кроме блока дедлайнов). */
+  /** Список на сегодня: выполненные, затем принятые задачи дня (кроме блока дедлайнов). */
   list: PlanTask[];
+  /** Награды списка: на N задач N + 1 награда, перед каждой задачей и после последней; пусто, если задач или наград нет. */
+  rewards: ListReward[];
   /** Вечерний опрос: принятые несделанные задачи прошлых дней, а с времени опроса и сегодняшние. */
   survey: PlanTask[];
   /** Опрос прошлого дня не пройден: новых задач на сегодня нет, план не составляется. */
@@ -212,7 +232,28 @@ function isLocked(plan: PlanRow[], date: string): boolean {
   return plan.some((row) => row.date < date);
 }
 
-function view(date: string, plan: PlanRow[], now: number, timezone: string): TodayView {
+/** Награды списка из `list` и наград пользователя; у открытой награды без названия награда еще не выбрана. */
+function listRewards(list: PlanTask[], rewards: DayReward[]): ListReward[] {
+  if (list.length === 0 || rewards.length === 0) return [];
+  const open = list.filter((task) => task.state === "done").length;
+  const chosen = new Map(rewards.filter((reward) => reward.position !== null).map((reward) => [reward.position, reward]));
+  const lines: ListReward[] = [];
+  for (let position = 0; position <= list.length; position++) {
+    const reward = position <= open ? chosen.get(position) : undefined;
+    lines.push({
+      position,
+      open: position === open,
+      past: position < open,
+      rewardId: reward?.id ?? null,
+      title: reward?.title ?? null,
+      minutes: reward?.minutes ?? null,
+    });
+  }
+  return lines;
+}
+
+function view(date: string, data: DayData, now: number, timezone: string): TodayView {
+  const plan = data.plan;
   const locked = isLocked(plan, date);
   const result: TodayView = {
     date,
@@ -220,6 +261,7 @@ function view(date: string, plan: PlanRow[], now: number, timezone: string): Tod
     buttons: {},
     picked: [],
     list: [],
+    rewards: [],
     survey: [],
     locked,
     done: 0,
@@ -257,7 +299,24 @@ function view(date: string, plan: PlanRow[], now: number, timezone: string): Tod
   const order = (task: PlanTask) => (task.slot === "think" ? 1 : 0);
   result.deadlines.sort((a, b) => a.position - b.position);
   result.picked.sort((a, b) => order(a) - order(b) || a.position - b.position);
+  // сделанные задачи идут первыми, порядок внутри сохраняется
+  result.list.sort((a, b) => (a.state === "done" ? 0 : 1) - (b.state === "done" ? 0 : 1));
+  result.rewards = listRewards(result.list, data.rewards);
   return result;
+}
+
+/**
+ * План дня для показа: если открытой награде списка еще не выбрана награда, она выбирается случайно из наград
+ * пользователя и записывается (до N + 1 раз за день). QUERY BUDGET EXCEPTION: запись награды с чтением наград — batch.
+ */
+async function present(db: Db, user: DayUser, date: string, data: DayData, now: number, random: () => number): Promise<TodayView> {
+  const result = view(date, data, now, user.timezone);
+  const open = result.rewards.find((reward) => reward.open);
+  if (!open || open.title !== null) return result;
+  const pool = [...new Map(data.rewards.map((reward) => [reward.id, reward])).values()];
+  const reward = pool[Math.min(pool.length - 1, Math.floor(random() * pool.length))];
+  const rewards = await saveDayReward(db, user.id, date, open.position, reward.id, now);
+  return view(date, { plan: data.plan, rewards }, now, user.timezone);
 }
 
 export type DayOutcome = "ok" | "invalid" | "not_found" | "none";
@@ -304,10 +363,10 @@ async function planOfDay(
   now: number,
   random: () => number,
   exclude?: string,
-): Promise<PlanRow[]> {
+): Promise<DayData> {
   const loaded = await loadPlan(db, user.id, date);
-  const todays = loaded.filter((row) => row.date === date);
-  if (isLocked(loaded, date) || todays.some((row) => composedSlots.includes(row.slot))) return loaded;
+  const todays = loaded.plan.filter((row) => row.date === date);
+  if (isLocked(loaded.plan, date) || todays.some((row) => composedSlots.includes(row.slot))) return loaded;
   const inPlan = new Set(todays.map((row) => row.itemId));
   if (exclude) inPlan.add(exclude);
   const candidates = (await planCandidates(db, user.id, now))
@@ -330,10 +389,20 @@ function blocksText(raw: unknown): string | undefined | null {
 }
 
 export const day = {
+  /** Голосовой первый шаг задачи (file_id Telegram), если он есть. */
+  voice(db: Db, userId: string, itemId: string): Promise<string | undefined> {
+    return firstStepVoice(db, userId, itemId);
+  },
+
+  /** Записывает (или заменяет) голосовой первый шаг задачи; false — задачи нет или она в архиве. */
+  saveVoice(db: Db, userId: string, itemId: string, fileId: string): Promise<boolean> {
+    return setFirstStepVoice(db, userId, itemId, fileId);
+  },
+
   /** План дня пользователя: читается, а если его еще нет, составляется и записывается; за день не пересчитывается. */
   async today(db: Db, user: DayUser, now: number, random: () => number = Math.random): Promise<TodayView> {
     const date = localDate(now, user.timezone);
-    return view(date, await planOfDay(db, user, date, now, random), now, user.timezone);
+    return present(db, user, date, await planOfDay(db, user, date, now, random), now, random);
   },
 
   /**
@@ -358,7 +427,7 @@ export const day = {
     }
     const date = localDate(now, user.timezone);
     const loaded = await loadPlan(db, user.id, date);
-    const plan = loaded.filter((other) => other.date === date);
+    const plan = loaded.plan.filter((other) => other.date === date);
     const row = plan.find((candidate) => candidate.slot === slot && candidate.position === position);
     if (!row) return { outcome: "not_found" };
     const key = { userId: user.id, date, slot: slot as PlanSlot, position };
@@ -367,8 +436,8 @@ export const day = {
     if (isButton && !current) return { outcome: "invalid" };
     const dopamine = row.flavor === "dopamine";
     const fields = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
-    const finish = (written: { changed: number; plan: PlanRow[] }): DayResult =>
-      written.changed > 0 ? { outcome: "ok", today: view(date, written.plan, now, user.timezone) } : { outcome: "invalid" };
+    const finish = async (written: { changed: number } & DayData): Promise<DayResult> =>
+      written.changed > 0 ? { outcome: "ok", today: await present(db, user, date, written, now, random) } : { outcome: "invalid" };
 
     switch (action as DayAction) {
       case "reveal":
@@ -443,11 +512,11 @@ export const day = {
     // пустой план составляется без выбранной задачи
     const plan = await planOfDay(db, user, date, now, Math.random, itemId);
     // пока опрос прошлого дня не пройден, новые задачи в план не добавляются: в ответе — день с опросом
-    if (isLocked(plan, date)) return { outcome: "invalid", today: view(date, plan, now, user.timezone) };
+    if (isLocked(plan.plan, date)) return { outcome: "invalid", today: view(date, plan, now, user.timezone) };
     const inToday = (rows: PlanRow[]) => rows.some((row) => row.date === date && row.itemId === itemId);
-    if (inToday(plan)) return { outcome: "invalid" };
+    if (inToday(plan.plan)) return { outcome: "invalid" };
     const written = await addPickedRow(db, user.id, date, itemId, now);
-    if (written.changed > 0) return { outcome: "ok", today: view(date, written.plan, now, user.timezone) };
+    if (written.changed > 0) return { outcome: "ok", today: await present(db, user, date, written, now, Math.random) };
     return { outcome: inToday(written.plan) ? "invalid" : "not_found" };
   },
 
@@ -500,7 +569,7 @@ export const day = {
     if (written.changed === 0) return { outcome: "invalid" };
     // опрос пройден: план дня составляется сразу (как при открытии страницы)
     const composed = written.plan.some((other) => other.date === today && composedSlots.includes(other.slot));
-    const rows = isLocked(written.plan, today) || composed ? written.plan : await planOfDay(db, user, today, now, Math.random);
-    return { outcome: "ok", today: view(today, rows, now, user.timezone) };
+    const rows = isLocked(written.plan, today) || composed ? written : await planOfDay(db, user, today, now, Math.random);
+    return { outcome: "ok", today: await present(db, user, today, rows, now, Math.random) };
   },
 };

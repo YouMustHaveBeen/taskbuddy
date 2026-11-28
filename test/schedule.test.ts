@@ -162,7 +162,7 @@ describe("запуск расписания", () => {
     expect(again?.remind_at).toBe(at(NEXT, "11:00"));
   });
 
-  it("ночью удаляются планы старше срока, снимаются истекшие «отложено до» и старые вопросы бота", async () => {
+  it("ночью удаляются планы и места наград старше срока, снимаются истекшие «отложено до» и старые вопросы бота", async () => {
     await markAll(D);
     const old = await insertTask("старая");
     const deferred = await insertTask("отложенная", { deferred: 1, deferred_until: at(D, "01:00") });
@@ -171,12 +171,17 @@ describe("запуск расписания", () => {
       env.DB.prepare("INSERT INTO day_plan (user_id, date, slot, position, item_id, state, created_at) VALUES (?, '2026-10-01', 'picked', 0, ?, 'done', 0)").bind(ann.id, old),
       env.DB.prepare("INSERT INTO day_plan (user_id, date, slot, position, item_id, state, created_at) VALUES (?, '2026-10-20', 'picked', 0, ?, 'done', 0)").bind(ann.id, old),
       env.DB.prepare("INSERT INTO bot_prompts (user_id, message_id, card_message_id, kind, date, slot, position, created_at) VALUES (?, 5, 4, 'blocks', ?, 'important', 0, ?)").bind(ann.id, D, at("2026-11-09", "01:00")),
+      env.DB.prepare("INSERT INTO rewards (id, user_id, title, minutes) VALUES ('r1', ?, 'планка', 3)").bind(ann.id),
+      env.DB.prepare("INSERT INTO day_rewards (user_id, date, position, reward_id, created_at) VALUES (?, '2026-10-01', 0, 'r1', 0)").bind(ann.id),
+      env.DB.prepare("INSERT INTO day_rewards (user_id, date, position, reward_id, created_at) VALUES (?, '2026-10-20', 0, 'r1', 0)").bind(ann.id),
     ]);
     const night = await schedule.tick(db(), at(NEXT, "03:00"));
     // сообщение удаленного вопроса убирается и из чата
     expect(night.users[0].staleMessages).toEqual([5]);
     const plans = await env.DB.prepare("SELECT date FROM day_plan").all<{ date: string }>();
     expect(plans.results.map((row) => row.date)).toEqual(["2026-10-20"]);
+    const rewards = await env.DB.prepare("SELECT date FROM day_rewards").all<{ date: string }>();
+    expect(rewards.results.map((row) => row.date)).toEqual(["2026-10-20"]);
     const flags = await env.DB.prepare("SELECT id, deferred FROM tasks WHERE id IN (?, ?)").bind(deferred, later).all<{ id: string; deferred: number }>();
     expect(Object.fromEntries(flags.results.map((row) => [row.id, row.deferred]))).toEqual({ [deferred]: 0, [later]: 1 });
     const prompts = await env.DB.prepare("SELECT count(*) AS n FROM bot_prompts").first<{ n: number }>();

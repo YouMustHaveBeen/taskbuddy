@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { t, type Language, type TextKey } from "../../i18n";
 import { api } from "./api";
+import { TextField } from "./Inbox";
 import { Tasks } from "./Tasks";
 import { TimerButton, TimerPanel, type TimerReply, type TimerView } from "./Timer";
 
@@ -19,13 +20,18 @@ type PlanRow = {
   level: "top" | "high" | "medium" | "low" | "none";
   pause: Pause | null;
   firstStep: string | null;
+  hasVoice: boolean;
   reasonPrompt: string | null;
   askBlocks: boolean;
 };
+/** Награда списка на сегодня: у прошедших и открытой есть название, следующие скрыты. */
+type ListReward = { position: number; open: boolean; past: boolean; title: string | null; minutes: number | null };
 type TodayView = {
   deadlines: PlanRow[];
   buttons: Partial<Record<Slot, PlanRow>>;
   picked: PlanRow[];
+  list: PlanRow[];
+  rewards: ListReward[];
   survey: PlanRow[];
   locked: boolean;
   done: number;
@@ -117,6 +123,22 @@ export function Today({ language, onSignedOut, ring }: Props) {
     else timerFailed(result.status);
   };
 
+  /** «Старт» у открытой награды; если уже идет другой таймер, показывается он и «Уже идет таймер». */
+  const startReward = async (position: number) => {
+    const result = await api<TimerReply<never>>("POST", `/timer/reward/${position}`, {});
+    setBusy(result.status === 409);
+    if (result.data) onTimer(result.data);
+    else timerFailed(result.status);
+  };
+
+  /** Первый шаг текстом из панели «👁»: записывается в карточку задачи, план перечитывается. */
+  const saveFirstStep = async (row: PlanRow, value: string) => {
+    const result = await api("PATCH", `/items/${row.itemId}`, { firstStepText: value });
+    if (result.status === 401) onSignedOut();
+    if (result.ok) void load();
+    return result.ok;
+  };
+
   /** Действие над строкой плана; в ответе приходит свежий план («Сделано» снимает таймер задачи). */
   const run = async (slot: string, position: number, action: string, body?: unknown): Promise<boolean> => {
     const result = await api<TodayView>("POST", `/today/${slot}/${position}/${action}`, body ?? {});
@@ -159,6 +181,7 @@ export function Today({ language, onSignedOut, ring }: Props) {
   };
 
   if (!view) return failed ? <p role="alert">{text("error.load")}</p> : null;
+  const open = view.rewards.find((reward) => reward.open);
   const empty =
     view.survey.length === 0 && view.deadlines.length === 0 && view.picked.length === 0 && Object.keys(view.buttons).length === 0;
 
@@ -221,9 +244,20 @@ export function Today({ language, onSignedOut, ring }: Props) {
       )}
       {!view.locked && <div className="block">
         <h2>{text("today.fiveTasks")}</h2>
+        <Peek view={view} text={text} save={saveFirstStep} />
         <div className="slots">
           {slots.map((slot) => (
-            <SlotCard key={slot} slot={slot} row={view.buttons[slot]} text={text} run={run} startTimer={startTimer} minutes={view.timerMinutes} />
+            <SlotCard
+              key={slot}
+              slot={slot}
+              row={view.buttons[slot]}
+              text={text}
+              run={run}
+              startTimer={startTimer}
+              minutes={view.timerMinutes}
+              reward={open}
+              startReward={startReward}
+            />
           ))}
           <button type="button" onClick={() => setChoosing(!choosing)} aria-expanded={choosing}>
             {text("slot.pick")}
@@ -249,6 +283,26 @@ export function Today({ language, onSignedOut, ring }: Props) {
         )}
         {choosing && <Tasks language={language} onSignedOut={onSignedOut} onPick={pick} />}
       </div>}
+      {!view.locked && view.list.length > 0 && (
+        <div className="block">
+          <h2>{text("bot.list.title")}</h2>
+          <ul className="rows">
+            {view.list.map((row, index) => (
+              <Fragment key={`${row.slot}-${row.position}`}>
+                {view.rewards[index] && <RewardRow reward={view.rewards[index]} text={text} start={startReward} />}
+                <li className="row">
+                  <span className={row.state === "done" ? "done" : undefined}>
+                    {row.state === "done" ? "✓" : "•"} {row.title}
+                  </span>
+                </li>
+              </Fragment>
+            ))}
+            {view.rewards[view.list.length] && (
+              <RewardRow reward={view.rewards[view.list.length]} text={text} start={startReward} />
+            )}
+          </ul>
+        </div>
+      )}
     </section>
   );
 }
@@ -331,6 +385,58 @@ function workRows(view: TodayView): PlanRow[] {
   return rows.filter((row) => row.state === "accepted" || (row.slot === "deadline" && row.state === "offered"));
 }
 
+/** Строка награды в списке на сегодня; у открытой — «Старт». */
+function RewardRow(props: { reward: ListReward; text: Text; start: (position: number) => Promise<void> }) {
+  const { reward, text, start } = props;
+  // прошедшее место без награды не показывается
+  if (reward.past && reward.title === null) return null;
+  return (
+    <li className="row reward-row">
+      <span>{reward.title === null ? text("reward.hidden") : text("reward.line", { title: reward.title })}</span>
+      {reward.open && reward.title !== null && (
+        <span className="actions">
+          <button type="button" onClick={() => void start(reward.position)}>
+            {text("reward.start")}
+          </button>
+        </span>
+      )}
+    </li>
+  );
+}
+
+/** «👁» над пятью кнопками: все задачи за кнопками с полем «Первый шаг»; задачи на кнопках остаются скрытыми. */
+function Peek(props: { view: TodayView; text: Text; save: (row: PlanRow, value: string) => Promise<boolean> }) {
+  const { view, text, save } = props;
+  const [open, setOpen] = useState(false);
+  const rows = slots.flatMap((slot) => {
+    const row = view.buttons[slot];
+    return row && (row.state === "offered" || row.state === "accepted") ? [{ slot, row }] : [];
+  });
+  if (rows.length === 0) return null;
+  return (
+    <div className="peek">
+      <button type="button" className="peek-toggle" onClick={() => setOpen(!open)} aria-expanded={open} aria-label={text("today.peek")} title={text("today.peek")}>
+        👁
+      </button>
+      {open && (
+        <div className="block">
+          <h3>{text("today.peek")}</h3>
+          <ul className="rows">
+            {rows.map(({ slot, row }) => (
+              <li key={slot} className="row peek-row">
+                <span className="slot-name">{text(slotLabels[slot])}</span>
+                <strong>{row.title}</strong>
+                {row.hasVoice && <p className="hint">{text("today.voiceStep")}</p>}
+                <TextField label={text("field.firstStep")} value={row.firstStep ?? ""} multiline onCommit={(value) => save(row, value)} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SlotCard(props: {
   slot: Slot;
   row?: PlanRow;
@@ -338,9 +444,13 @@ function SlotCard(props: {
   run: Run;
   startTimer: (row: PlanRow, minutes: number) => Promise<void>;
   minutes: number[];
+  /** Открытая награда списка на сегодня (для «Награда» после «Сделано»). */
+  reward?: ListReward;
+  startReward: (position: number) => Promise<void>;
 }) {
-  const { slot, row, text, run, startTimer, minutes } = props;
+  const { slot, row, text, run, startTimer, minutes, reward, startReward } = props;
   const [step, setStep] = useState<Step>();
+  const [showReward, setShowReward] = useState(false);
   const label = text(slotLabels[slot]);
   if (!row) return <button type="button" disabled>{label}</button>;
   const go = (action: string, body?: unknown) => run(slot, row.position, action, body);
@@ -360,6 +470,7 @@ function SlotCard(props: {
       <strong>{row.title}</strong>
       <span className="meta">{text(levelLabels[row.level])}</span>
       {row.firstStep && <p className="hint">{row.firstStep}</p>}
+      {row.hasVoice && <p className="hint">{text("today.voiceStep")}</p>}
     </div>
   );
 
@@ -419,7 +530,20 @@ function SlotCard(props: {
     return (
       <div className="slot-card">
         <span className="slot-name">{label}</span>
+        {showReward && reward?.title && (
+          <p>
+            {text("reward.line", { title: reward.title })}{" "}
+            <button type="button" onClick={() => void startReward(reward.position)}>
+              {text("reward.start")}
+            </button>
+          </p>
+        )}
         <div className="actions">
+          {reward?.title && (
+            <button type="button" onClick={() => setShowReward(!showReward)} aria-expanded={showReward}>
+              {text("action.reward")}
+            </button>
+          )}
           <button type="button" onClick={() => void go("dopamine")}>
             {text("action.dopamine")}
           </button>

@@ -3,12 +3,13 @@ import type { Db } from "./client";
 /**
  * Вопрос бота, ответом на который считается ответ на сообщение `messageId`; контекст — строка плана и карточка.
  * У вопросов таймера (`park`, `return`) строки плана нет: `slot` пустой, `cardMessageId` — сообщение таймера.
+ * У вопроса о первом шаге (`first_step`) в `action` — задача; `messageId` — вопрос или голосовое с первым шагом.
  */
 export type BotPrompt = {
   userId: string;
   messageId: number;
   cardMessageId: number;
-  kind: "reason" | "blocks" | "survey" | "return" | "park";
+  kind: "reason" | "blocks" | "survey" | "return" | "park" | "first_step";
   date: string;
   slot: string;
   position: number;
