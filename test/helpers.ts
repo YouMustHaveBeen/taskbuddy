@@ -20,6 +20,7 @@ export async function resetDb(): Promise<void> {
       "timers",
       "bot_prompts",
       "day_plan",
+      "day_rewards",
       "insight_spheres",
       "insights",
       "zones",
@@ -55,7 +56,7 @@ export function mockTelegram(): TelegramCall[] {
     const result =
       method === "getMe"
         ? { id: 1, is_bot: true, first_name: "TaskBuddy", username: "test_bot" }
-        : method === "sendMessage"
+        : method === "sendMessage" || method === "sendVoice"
           ? { message_id: 1, date: 0, chat: { id: payload.chat_id, type: "private" } }
           : true;
     return Response.json({ ok: true, result });

@@ -83,8 +83,8 @@
   "action.accept": "Принять",
   "action.refuse": "Отказаться",
   "action.done": "Сделано",
-  "action.dopamine": "Дофамин",
-  "action.refresh": "Обновить",
+  "action.dopamine": "🚀 Дофамин",
+  "action.refresh": "🔄 Обновить",
   "action.take": "Взять",
   "action.takeAnyway": "Все же взять",
   "action.writeReason": "Записать причину отказа",
@@ -144,5 +144,15 @@
   "timer.stopped": "⏹ Таймер остановлен: {title}",
   "timer.busy": "Уже идет таймер: {title}",
   "timer.park.prompt": "Какая мысль? Напиши или продиктуй, она уйдет в инбокс",
-  "timer.thought": "Мысль"
+  "timer.thought": "Мысль",
+  "action.reward": "🏆 Награда",
+  "reward.hidden": "🎁 Награда",
+  "reward.line": "🏆 {title}",
+  "reward.start": "Старт",
+  "reward.startNamed": "Старт: {title}",
+  "today.peek": "Все задачи за кнопками",
+  "today.voiceStep": "🎤 Первый шаг записан голосом в боте",
+  "bot.firstStep.prompt": "С чего начнешь? Запиши голосовое: самое маленькое действие на первые две минуты.",
+  "bot.firstStep.caption": "Первый шаг: {title}\nОтветь голосовым, чтобы заменить",
+  "bot.voice.only": "Голосовое сохраняется только как первый шаг: ответь им на вопрос о первом шаге"
 }

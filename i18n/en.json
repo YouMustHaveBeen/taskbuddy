@@ -83,8 +83,8 @@
   "action.accept": "Accept",
   "action.refuse": "Decline",
   "action.done": "Done",
-  "action.dopamine": "Dopamine",
-  "action.refresh": "Refresh",
+  "action.dopamine": "🚀 Dopamine",
+  "action.refresh": "🔄 Refresh",
   "action.take": "Take",
   "action.takeAnyway": "Take it anyway",
   "action.writeReason": "Write the reason",
@@ -140,5 +140,15 @@
   "timer.stopped": "⏹ Timer stopped: {title}",
   "timer.busy": "A timer is already running: {title}",
   "timer.park.prompt": "What's the thought? Type or dictate it, it will go to the inbox",
-  "timer.thought": "Thought"
+  "timer.thought": "Thought",
+  "action.reward": "🏆 Reward",
+  "reward.hidden": "🎁 Reward",
+  "reward.line": "🏆 {title}",
+  "reward.start": "Start",
+  "reward.startNamed": "Start: {title}",
+  "today.peek": "All tasks behind the buttons",
+  "today.voiceStep": "🎤 First step recorded as a voice message in the bot",
+  "bot.firstStep.prompt": "Where will you start? Record a voice message: the smallest action for the first two minutes.",
+  "bot.firstStep.caption": "First step: {title}\nReply with a voice message to replace it",
+  "bot.voice.only": "Voice messages are saved only as a first step: reply with one to the first step question"
 }

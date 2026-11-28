@@ -1,6 +1,6 @@
 import { InlineKeyboard, type Api } from "grammy/web";
 import { t, type Language, type TextKey } from "../../i18n";
-import type { TodayView } from "../core/day";
+import type { ListReward, TodayView } from "../core/day";
 import { dropPrompts, savePrompt, setListMessage, type BotPrompt } from "../db/botPrompts";
 import type { Db } from "../db/client";
 import type { User } from "../db/users";
@@ -35,13 +35,28 @@ export async function clearPrompts(tg: Tg, cardMessageId: number) {
   }
 }
 
-/** Список на сегодня: старое сообщение удаляется, новое присылается последним в чате. */
+/** Строка награды списка: у прошедших и открытой — название, следующие скрыты. */
+export const rewardLine = (user: User, reward: ListReward) =>
+  reward.title === null ? say(user, "reward.hidden") : say(user, "reward.line", { title: reward.title });
+
+/**
+ * Список на сегодня: награда, задача, награда … и в конце награда; старое сообщение удаляется, новое присылается
+ * последним в чате.
+ */
 export async function sendList(tg: Tg, view: TodayView): Promise<void> {
   const lines = [say(tg.user, "bot.list.title"), ""];
   if (view.list.length === 0) lines.push(say(tg.user, "bot.list.empty"));
-  for (const task of view.list) lines.push(`${task.state === "done" ? "✓" : "•"} ${task.title}`);
-  // «Сделано: название» и «Таймер» под списком — для каждой принятой несделанной задачи
+  view.list.forEach((task, index) => {
+    const reward = view.rewards[index];
+    if (reward) lines.push(rewardLine(tg.user, reward));
+    lines.push(`${task.state === "done" ? "✓" : "•"} ${task.title}`);
+  });
+  const last = view.rewards[view.list.length];
+  if (last) lines.push(rewardLine(tg.user, last));
   const keyboard = new InlineKeyboard();
+  const open = view.rewards.find((reward) => reward.open);
+  if (open?.title) keyboard.text(say(tg.user, "reward.startNamed", { title: open.title }), data("tr", view.date, open.position)).row();
+  // «Сделано: название» и «Таймер» под списком — для каждой принятой несделанной задачи
   for (const task of view.list.filter((row) => row.state === "accepted")) {
     keyboard
       .text(say(tg.user, "bot.list.done", { title: task.title }), data("l", view.date, task.slot, task.position))

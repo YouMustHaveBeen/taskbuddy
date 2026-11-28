@@ -51,6 +51,13 @@ timerRoutes.post("/timer/start/:slot/:position/:minutes", requireUser, async (c)
   return reply(c, result);
 });
 
+/** «Старт» у открытой награды списка на сегодня. */
+timerRoutes.post("/timer/reward/:position", requireUser, async (c) => {
+  const result = await timer.reward(c.var.db, c.var.user, Date.now(), Number(c.req.param("position")), "web");
+  await arm(c, result);
+  return reply(c, result);
+});
+
 timerRoutes.post("/timer/again/:minutes", requireUser, async (c) => {
   const result = await timer.again(c.var.db, c.var.user, Date.now(), Number(c.req.param("minutes")), "web");
   await arm(c, result);

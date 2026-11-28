@@ -347,7 +347,7 @@ export function Labeled(props: { label: string; children: ReactNode }) {
   );
 }
 
-function TextField(props: {
+export function TextField(props: {
   label: string;
   value: string;
   multiline?: boolean;

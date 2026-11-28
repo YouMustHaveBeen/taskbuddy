@@ -106,13 +106,13 @@ Cron раз в 5 минут ───────┘
 | routines | тот же id; period (zone / daily / weekly / monthly / yearly), part\_of\_day, weekday, zone\_no (1–5), order |
 | practices | тот же id; unit; goal\_total (итоговая цель, может быть пусто); min\_value + min\_period (day / week / month; минимум за период, может быть пусто); у практики могут быть и цель, и минимум |
 | suggestions | предложения Claude для записи инбокса: поля карточки и первый шаг; до подтверждения пользователем в карточку ничего не пишется |
-| rewards | список маленьких наград: user, title, minutes (по умолчанию 10) |
+| rewards | список маленьких наград: user, title, minutes (по умолчанию 10); выбранные награды списка на сегодня — в day\_rewards: user, date, position, reward\_id |
 | insights | ответы на «Что мешает?»: user, text, сферы (insight\_spheres); без задачи и даты; показываются на вкладке «Инсайты» |
 | claude\_profile | выжимка правил пользователя после режима обучения: user, text, built\_at, tasks\_count |
 | справочники | spheres, item\_spheres, action\_kinds, categories (прогулка, поездка, дом, наушники), category\_compat (пара хранится один раз, в упорядоченном виде), rewards; у каждого пользователя свои, редактируются на вкладке «Справочники»; значения не заводятся заранее |
 | routine\_marks | routine\_id + ключ периода («2026-11-25», «2026-W48», «2026-11», «2026»; для зоны неделя + номер круга); сбрасывать не нужно; старше года удаляются |
 | practice\_logs | сколько и когда |
-| day\_plan | user, date, slot (deadline / important / urgent / impactful / easy / picked / extra / think / review / reward), item\_id, position, hidden (для наград), state, replacements |
+| day\_plan | user, date, slot (deadline / important / urgent / impactful / easy / picked / extra / think / review), item\_id, position, hidden (задача за кнопкой до нажатия), state, replacements |
 | task\_events | история: создано, отказ (с причиной), перенос, выполнено |
 | daily\_stats | user, date, сделано задач / рутин / минут практик; не удаляется с архивом |
 | bot\_prompts | вопросы бота (причина отказа, «Что мешает?»), ответом на которые считается ответ на сообщение: user, message\_id, сообщение карточки, строка плана; старше суток удаляются |

@@ -21,9 +21,10 @@ function timerText(tg: Tg, current: TimerView, shown: Shown): string {
   return say(tg.user, shown === "ended" ? "timer.ended" : "timer.stopped", { title: current.title });
 }
 
-/** Кнопки таймера: пока идет — «Пауза» (или «Продолжить»), «Стоп», «Парковка»; после остановки — четыре кнопки. */
+/** Кнопки таймера: пока идет — «Пауза» (или «Продолжить»), «Стоп», «Парковка»; после остановки — четыре кнопки, у награды одна «Завершить». */
 function timerKeyboard(tg: Tg, current: TimerView): InlineKeyboard {
   const keyboard = new InlineKeyboard();
+  if (current.state === "ended" && current.kind === "reward") return keyboard.text(say(tg.user, "timer.finish"), data("t", "f"));
   if (current.state === "ended") {
     return keyboard
       .text(say(tg.user, "timer.finish"), data("t", "f"))
@@ -91,6 +92,29 @@ async function started(tg: Tg, messageId: number, messageText: string, result: T
   }
 }
 
+/**
+ * «Старт» у награды (в списке на сегодня или после «Награда»): таймер на длину награды приходит новым сообщением.
+ * Если награда уже не открыта, присылается актуальный список.
+ */
+async function startReward(tg: Tg, messageId: number, messageText: string, date: string, position: number) {
+  if (date !== localDate(Date.now(), tg.user.timezone)) {
+    await markStale(tg, messageId, messageText);
+    return;
+  }
+  const result = await timer.reward(tg.db, tg.user, Date.now(), position, "bot");
+  if (result.outcome === "ok" && result.timer) {
+    const sent = await tg.api.sendMessage(tg.user.telegramId, timerText(tg, result.timer, "live"), {
+      reply_markup: timerKeyboard(tg, result.timer),
+    });
+    await timer.setMessage(tg.db, tg.user.id, result.timer.itemId, sent.message_id);
+    await arm(tg, result.timer);
+  } else if (result.outcome === "busy" && result.timer) {
+    await sendBusy(tg, result.timer);
+  } else if (result.today) {
+    await sendList(tg, result.today);
+  }
+}
+
 /** Время вышло (будильник): «Время вышло» с четырьмя кнопками приходит новым сообщением; возвращает его номер. */
 export async function sendTimerEnded(tg: Tg, current: TimerView): Promise<number> {
   const sent = await tg.api.sendMessage(tg.user.telegramId, timerText(tg, current, "ended"), { reply_markup: timerKeyboard(tg, current) });
@@ -124,7 +148,7 @@ function asksBlocks(today: TodayView, itemId: string): boolean {
   return rows.some((row) => row.itemId === itemId && row.askBlocks && row.flavor !== "dopamine");
 }
 
-/** Кнопки таймера в боте: «tm» — выбор длины, «ts» — запуск, «t|…» — кнопки идущего и остановленного таймера. */
+/** Кнопки таймера в боте: «ts» — запуск у задачи, «tr» — у награды, «tn» — «Продолжить», «t|…» — кнопки идущего и остановленного таймера. */
 export async function onTimerCallback(tg: Tg, messageId: number, messageText: string, parts: string[], today: () => Promise<TodayView>) {
   const now = Date.now();
   if (parts[0] === "ts" && parts.length === 5) {
@@ -135,6 +159,10 @@ export async function onTimerCallback(tg: Tg, messageId: number, messageText: st
     }
     const target = { slot, position: Number(rawPosition), minutes: Number(rawMinutes) };
     await started(tg, messageId, messageText, await timer.start(tg.db, tg.user, now, target, "bot", messageId));
+    return;
+  }
+  if (parts[0] === "tr" && parts.length === 3) {
+    await startReward(tg, messageId, messageText, parts[1], Number(parts[2]));
     return;
   }
   if (parts[0] === "tn" && parts.length === 2) {

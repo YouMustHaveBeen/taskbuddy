@@ -85,6 +85,23 @@ export const timer = {
     return startFor(db, user, now, row, target.minutes, place, botMessageId);
   },
 
+  /**
+   * «Старт» у открытой награды списка на сегодня (`position` из `rewards` в `GET /today`): таймер на длину награды.
+   * QUERY BUDGET EXCEPTION: план дня с наградами (1–3 запроса) и запись таймера с чтением (batch).
+   */
+  async reward(db: Db, user: DayUser, now: number, position: number, place: TimerPlace, botMessageId: number | null = null): Promise<TimerResult> {
+    if (!Number.isInteger(position)) return { outcome: "invalid" };
+    const today = await day.today(db, user, now);
+    const open = today.rewards.find((line) => line.open && line.position === position);
+    if (!open?.rewardId || open.minutes === null) return { outcome: "not_found", today };
+    const written = await startTimer(
+      db,
+      { userId: user.id, kind: "reward", itemId: open.rewardId, minutes: open.minutes, startedIn: place, botMessageId },
+      now,
+    );
+    return { outcome: written.changed > 0 ? "ok" : written.timer ? "busy" : "not_found", timer: view(written.timer, now) };
+  },
+
   /** «Продолжить» после «Стоп» или окончания: таймер той же задачи снова, с новой длиной. QUERY BUDGET EXCEPTION: таймер, план дня, запись. */
   async again(db: Db, user: DayUser, now: number, minutes: number, place: TimerPlace, botMessageId: number | null = null): Promise<TimerResult> {
     if (!validMinutes(minutes)) return { outcome: "invalid" };
@@ -127,13 +144,19 @@ export const timer = {
   },
 
   /**
-   * Кнопки после таймера задачи: finish — «Завершить» (как «Сделано»), later — «Продолжить позже» (таймер снимается,
+   * Кнопки после таймера: у награды только finish — «Завершить» (таймер снимается). У задачи finish — «Завершить» (как «Сделано»), later — «Продолжить позже» (таймер снимается,
    * задача остается в списке на сегодня), back — «Вернуть» (задача в хранилище, `body.blocks` — ответ «Что мешает?»).
    * В ответе — таймер до нажатия и план дня. QUERY BUDGET EXCEPTION: таймер, план дня и действие над строкой плана.
    */
   async close(db: Db, user: DayUser, now: number, action: "finish" | "later" | "back", body?: unknown): Promise<TimerResult> {
     const current = view(await loadTimer(db, user.id), now);
-    if (!current || current.kind !== "task") return { outcome: "not_found" };
+    if (!current || current.kind === "zone") return { outcome: "not_found" };
+    // у награды после таймера одна кнопка «Завершить»: таймер снимается
+    if (current.kind === "reward") {
+      if (action !== "finish" || current.state !== "ended") return { outcome: "invalid", timer: current };
+      const dropped = await dropTimer(db, user.id, current.itemId);
+      return { outcome: dropped > 0 ? "ok" : "not_found", timer: current };
+    }
     if (action === "later") {
       const dropped = await dropTimer(db, user.id, current.itemId);
       return { outcome: dropped > 0 ? "ok" : "not_found", timer: current };

@@ -85,7 +85,7 @@ type PanelProps<Today> = {
   onFailed: (status?: number) => void;
 };
 
-/** Таймер над «Пять задач»: отсчет мм:сс, «Пауза», «Стоп», «Парковка»; после остановки — четыре кнопки. */
+/** Таймер над «Пять задач»: отсчет мм:сс, «Пауза», «Стоп», «Парковка»; после остановки — четыре кнопки, у награды одна «Завершить». */
 export function TimerPanel<Today>({ timer, text, minutes, askBlocks, onReply, onFailed }: PanelProps<Today>) {
   const [now, setNow] = useState(() => Date.now());
   const [step, setStep] = useState<"park" | "again" | "back">();
@@ -187,7 +187,14 @@ export function TimerPanel<Today>({ timer, text, minutes, askBlocks, onReply, on
         </>
       )}
       {!ended && parked && step !== "park" && <p className="hint">👍</p>}
-      {ended && (step === undefined || step === "park") && (
+      {ended && timer.kind === "reward" && (
+        <div className="actions">
+          <button type="button" className="primary" onClick={() => void close("finish")}>
+            {text("timer.finish")}
+          </button>
+        </div>
+      )}
+      {ended && timer.kind !== "reward" && (step === undefined || step === "park") && (
         <div className="actions">
           <button type="button" className="primary" onClick={() => void close("finish")}>
             {text("timer.finish")}

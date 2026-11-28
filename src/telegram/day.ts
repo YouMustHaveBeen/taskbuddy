@@ -5,7 +5,7 @@ import { buttonSlots, day, localDate, type ButtonSlot, type DayResult, type Plan
 import { schedule } from "../core/schedule";
 import { savePrompt, takePrompt, type BotPrompt } from "../db/botPrompts";
 import type { User } from "../db/users";
-import { ask, clearPrompts, data, markAnswered, markStale, say, sendList, type Tg } from "./common";
+import { ask, clearPrompts, data, markAnswered, markStale, rewardLine, say, sendList, type Tg } from "./common";
 import { answerTimerPrompt, onTimerCallback, sendTimerChoice } from "./timer";
 
 type Step = "why" | "blocks";
@@ -27,8 +27,9 @@ function refusedStep(task: PlanTask): Step | undefined {
   return task.askBlocks ? "blocks" : undefined;
 }
 
-/** Карточка задачи из плана: текст и кнопки по ее состоянию. */
-function card(user: User, date: string, task: PlanTask, step?: Step, note?: string): { text: string; keyboard?: InlineKeyboard } {
+/** Карточка задачи из плана дня `view`: текст и кнопки по ее состоянию. */
+function card(user: User, view: TodayView, task: PlanTask, step?: Step, note?: string): { text: string; keyboard?: InlineKeyboard } {
+  const date = view.date;
   const head = isButton(task.slot) ? `${say(user, `slot.${task.slot}`)}: ${task.title}` : task.title;
   const lines = [head];
   if (task.firstStep) lines.push(task.firstStep);
@@ -59,6 +60,8 @@ function card(user: User, date: string, task: PlanTask, step?: Step, note?: stri
   } else if (task.state === "done" || (task.state === "closed" && dopamine)) {
     lines[0] = `✓ ${head}`;
     if (isButton(task.slot)) {
+      // «Награда» — открытая награда списка на сегодня; без наград в «Справочниках» кнопки нет
+      if (view.rewards.length > 0) keyboard.text(say(user, "action.reward"), data("rw", date));
       keyboard.text(say(user, "action.dopamine"), act("dopamine")).text(say(user, "action.refresh"), act("refresh"));
     }
   } else {
@@ -69,7 +72,7 @@ function card(user: User, date: string, task: PlanTask, step?: Step, note?: stri
 }
 
 async function editCard(tg: Tg, messageId: number, view: TodayView, task: PlanTask, step?: Step, note?: string, stale = false) {
-  const shown = card(tg.user, view.date, task, step, note);
+  const shown = card(tg.user, view, task, step, note);
   const text = stale ? `${say(tg.user, "bot.stale")}\n\n${shown.text}` : shown.text;
   await tg.api
     .editMessageText(tg.user.telegramId, messageId, text, { reply_markup: shown.keyboard ?? { inline_keyboard: [] } })
@@ -201,6 +204,34 @@ async function afterWhy(tg: Tg, messageId: number, view: TodayView, task: PlanTa
   }
 }
 
+/**
+ * Первый шаг задачи после «Принять» и после показа за кнопкой: голосовое, если оно есть (ответ голосовым на него
+ * заменяет шаг); без голосового — вопрос о первом шаге (только после «Принять»).
+ */
+async function sendFirstStep(tg: Tg, cardMessageId: number, task: PlanTask) {
+  const prompt = { kind: "first_step" as const, date: task.date, slot: task.slot, position: task.position, action: task.itemId };
+  const voice = task.hasVoice ? await day.voice(tg.db, tg.user.id, task.itemId) : undefined;
+  if (!voice) {
+    await ask(tg, cardMessageId, prompt, "bot.firstStep.prompt");
+    return;
+  }
+  const caption = say(tg.user, "bot.firstStep.caption", { title: task.title });
+  const sent = await tg.api.sendVoice(tg.user.telegramId, voice, { caption });
+  await savePrompt(tg.db, { ...prompt, userId: tg.user.id, messageId: sent.message_id, cardMessageId }, Date.now());
+}
+
+/** Голосовое ответом на вопрос о первом шаге или на голосовой первый шаг: записывается в задачу. false — это не такой ответ. */
+export async function onVoice(tg: Tg, replyTo: number, fileId: string): Promise<boolean> {
+  const prompt = await takePrompt(tg.db, tg.user.id, replyTo);
+  if (!prompt) return false;
+  if (prompt.kind !== "first_step" || !prompt.action) {
+    // голосовое не ответ на этот вопрос: вопрос остается
+    await savePrompt(tg.db, prompt, Date.now());
+    return false;
+  }
+  return day.saveVoice(tg.db, tg.user.id, prompt.action, fileId);
+}
+
 /** Сообщение «TaskBuddy» со ссылкой входа на страницу; `pick` — страница открывается в режиме выбора. */
 export async function sendLoginLink(tg: Tg, pick: boolean): Promise<void> {
   const token = await createLoginLink(tg.db, tg.user.id, Date.now());
@@ -226,7 +257,7 @@ export async function onCallback(tg: Tg, messageId: number, messageText: string,
     else await showStale(tg, messageId, slot, Number(rawPosition), messageText);
     return;
   }
-  if (parts[0] === "ts" || parts[0] === "tn" || parts[0] === "t") {
+  if (parts[0] === "ts" || parts[0] === "tr" || parts[0] === "tn" || parts[0] === "t") {
     await onTimerCallback(tg, messageId, messageText, parts, () => day.today(tg.db, tg.user, Date.now()));
     return;
   }
@@ -248,8 +279,21 @@ export async function onCallback(tg: Tg, messageId: number, messageText: string,
       await tg.api.sendMessage(tg.user.telegramId, say(tg.user, "today.noMore"));
       return;
     }
-    const shown = card(tg.user, view.date, task);
-    await tg.api.sendMessage(tg.user.telegramId, shown.text, { reply_markup: shown.keyboard });
+    const shown = card(tg.user, view, task);
+    const sent = await tg.api.sendMessage(tg.user.telegramId, shown.text, { reply_markup: shown.keyboard });
+    if (task.hasVoice) await sendFirstStep(tg, sent.message_id, task);
+    return;
+  }
+
+  if (parts[0] === "rw" && parts.length === 2) {
+    const view = await day.today(tg.db, tg.user, now);
+    const open = view.rewards.find((reward) => reward.open);
+    if (parts[1] !== view.date || !open?.title) {
+      await markStale(tg, messageId, messageText);
+      return;
+    }
+    const keyboard = new InlineKeyboard().text(say(tg.user, "reward.start"), data("tr", view.date, open.position));
+    await tg.api.sendMessage(tg.user.telegramId, rewardLine(tg.user, open), { reply_markup: keyboard });
     return;
   }
 
@@ -296,6 +340,8 @@ export async function onCallback(tg: Tg, messageId: number, messageText: string,
       return;
     }
     await editCard(tg, messageId, result.today, task);
+    // не менять порядок: список на сегодня должен остаться последним сообщением
+    if (action === "accept") await sendFirstStep(tg, messageId, task);
     if (action === "accept" || action === "done") await sendList(tg, result.today);
     return;
   }
@@ -365,6 +411,11 @@ export async function onReply(tg: Tg, replyTo: number, text: string): Promise<bo
   const prompt = await takePrompt(tg.db, tg.user.id, replyTo);
   if (!prompt) return false;
   const now = Date.now();
+  if (prompt.kind === "first_step") {
+    // первый шаг в боте только голосом: текст уходит в инбокс, вопрос остается
+    await savePrompt(tg.db, prompt, now);
+    return false;
+  }
   try {
     await answerPrompt(tg, prompt, text, now);
   } catch (error) {
