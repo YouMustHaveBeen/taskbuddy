@@ -106,10 +106,17 @@ export async function sendList(tg: Tg, view: TodayView): Promise<void> {
   const lines = [say(tg.user, "bot.list.title"), ""];
   if (view.list.length === 0) lines.push(say(tg.user, "bot.list.empty"));
   for (const task of view.list) lines.push(`${task.state === "done" ? "✓" : "•"} ${task.title}`);
+  // «Сделано: название» под списком — для каждой принятой несделанной задачи
+  const keyboard = new InlineKeyboard();
+  for (const task of view.list.filter((row) => row.state === "accepted")) {
+    keyboard.text(say(tg.user, "bot.list.done", { title: task.title }), data("l", view.date, task.slot, task.position)).row();
+  }
   if (tg.user.listMessageId !== null) {
     await tg.api.deleteMessage(tg.user.telegramId, tg.user.listMessageId).catch(() => undefined);
   }
-  const sent = await tg.api.sendMessage(tg.user.telegramId, lines.join("\n"));
+  const sent = await tg.api.sendMessage(tg.user.telegramId, lines.join("\n"), {
+    reply_markup: keyboard.inline_keyboard.length > 0 ? keyboard : undefined,
+  });
   await setListMessage(tg.db, tg.user.id, sent.message_id);
   tg.user.listMessageId = sent.message_id;
 }
@@ -149,13 +156,31 @@ export async function sendReminder(tg: Tg, itemId: string, title: string, remind
   await tg.api.sendMessage(tg.user.telegramId, say(tg.user, "bot.reminder", { title }), { reply_markup: keyboard });
 }
 
+/** Предел длины сообщения Telegram. */
+const messageLimit = 4096;
+
+/** «Завтра дедлайн: название» по строке на задачу; длинный список делится на несколько сообщений. */
 export async function sendDeadlines(tg: Tg, titles: string[]): Promise<void> {
-  await tg.api.sendMessage(tg.user.telegramId, titles.map((title) => say(tg.user, "bot.deadlineTomorrow", { title })).join("\n"));
+  const chunks: string[] = [];
+  for (const title of titles) {
+    const line = say(tg.user, "bot.deadlineTomorrow", { title }).slice(0, messageLimit);
+    const last = chunks.length - 1;
+    if (last >= 0 && chunks[last].length + 1 + line.length <= messageLimit) chunks[last] += `\n${line}`;
+    else chunks.push(line);
+  }
+  for (const chunk of chunks) await tg.api.sendMessage(tg.user.telegramId, chunk);
 }
 
 /** Сообщение без кнопок с отметкой выбранного ответа. */
 async function markAnswered(tg: Tg, messageId: number, text: string, label: TextKey) {
   await tg.api.editMessageText(tg.user.telegramId, messageId, `${text}\n\n✓ ${say(tg.user, label)}`, {
+    reply_markup: { inline_keyboard: [] },
+  }).catch(() => undefined);
+}
+
+/** Кнопка устарела (задачу удалили или изменили): кнопки снимаются, на сообщении «Это уже изменилось». */
+async function markStale(tg: Tg, messageId: number, text: string) {
+  await tg.api.editMessageText(tg.user.telegramId, messageId, `${text}\n\n${say(tg.user, "bot.stale")}`, {
     reply_markup: { inline_keyboard: [] },
   }).catch(() => undefined);
 }
@@ -168,7 +193,19 @@ async function continueSurvey(tg: Tg, view: TodayView) {
   }
   await tg.api.sendMessage(tg.user.telegramId, say(tg.user, "bot.survey.done"));
   const now = Date.now();
-  if (!view.locked && (await schedule.claimMorning(tg.db, tg.user, now))) await sendMorning(tg, await day.today(tg.db, tg.user, now));
+  const previous = tg.user.morningOn;
+  if (!view.locked && (await schedule.claimMorning(tg.db, tg.user, now))) {
+    try {
+      await sendMorning(tg, await day.today(tg.db, tg.user, now));
+    } catch (error) {
+      // утро не отправилось: отметка возвращается, утро пришлет ближайший запуск расписания
+      await schedule.release(tg.db, tg.user.id, { column: "morning_on", date: localDate(now, tg.user.timezone), previous });
+      throw error;
+    }
+    return;
+  }
+  // ответы опроса меняют список на сегодня: после опроса он присылается заново
+  if (!view.locked) await sendList(tg, view);
 }
 
 /** Записывает ответ опроса и показывает его на сообщении вопроса. */
@@ -312,15 +349,38 @@ export async function onCallback(tg: Tg, messageId: number, messageText: string,
 
   if (parts[0] === "r" && parts[1] === "t" && parts.length === 3) {
     const result = await day.pick(tg.db, tg.user, now, parts[2]);
-    await markAnswered(tg, messageId, messageText, "action.takeToday");
-    if (result.outcome === "ok" && result.today) await sendList(tg, result.today);
+    if (result.today?.locked) {
+      // сначала вчерашний опрос; кнопки напоминания остаются, чтобы взять задачу после него
+      await sendSurvey(tg, result.today, true);
+      return;
+    }
+    if (result.outcome === "ok" && result.today) {
+      await markAnswered(tg, messageId, messageText, "action.takeToday");
+      await sendList(tg, result.today);
+    } else {
+      await markStale(tg, messageId, messageText);
+    }
     return;
   }
 
   if (parts[0] === "r" && parts[1] === "a" && parts.length === 4) {
     const original = Number(parts[3]);
-    if (Number.isFinite(original)) await schedule.remindTomorrow(tg.db, tg.user, parts[2], original, now);
-    await markAnswered(tg, messageId, messageText, "action.remindTomorrow");
+    if (Number.isFinite(original) && (await schedule.remindTomorrow(tg.db, tg.user, parts[2], original, now))) {
+      await markAnswered(tg, messageId, messageText, "action.remindTomorrow");
+    } else {
+      await markStale(tg, messageId, messageText);
+    }
+    return;
+  }
+
+  if (parts[0] === "l" && parts.length === 4) {
+    const [, date, slot, rawPosition] = parts;
+    const position = Number(rawPosition);
+    const result =
+      date === localDate(now, tg.user.timezone)
+        ? await day.act(tg.db, tg.user, now, { slot, position, action: "done" }, undefined)
+        : undefined;
+    await sendList(tg, result?.today ?? (await day.today(tg.db, tg.user, now)));
   }
 }
 
@@ -329,15 +389,32 @@ export async function onReply(tg: Tg, replyTo: number, text: string): Promise<bo
   const prompt = await takePrompt(tg.db, tg.user.id, replyTo);
   if (!prompt) return false;
   const now = Date.now();
+  try {
+    await answerPrompt(tg, prompt, text, now);
+  } catch (error) {
+    // ответ не обработан: вопрос возвращается, на него можно ответить еще раз
+    await savePrompt(tg.db, prompt, now).catch(() => undefined);
+    throw error;
+  }
+  return true;
+}
+
+async function answerPrompt(tg: Tg, prompt: BotPrompt, text: string, now: number): Promise<void> {
   const { cardMessageId, slot, position } = prompt;
+  const today = localDate(now, tg.user.timezone);
   if (prompt.kind === "reason") {
+    // ответ после полуночи относится к строке вчерашнего плана: в сегодняшнюю он не записывается
+    if (prompt.date !== today) {
+      await showStale(tg, cardMessageId, slot, position);
+      return;
+    }
     const result = await day.act(tg.db, tg.user, now, { slot, position, action: "reason" }, { text });
     const view = result.today ?? (await day.today(tg.db, tg.user, now));
     const task = findTask(view, slot, position);
     if (task && task.state === "refused" && task.position === position) await afterWhy(tg, cardMessageId, view, task);
     else await showStale(tg, cardMessageId, slot, position);
   } else if (prompt.kind === "blocks") {
-    if (prompt.date === localDate(now, tg.user.timezone)) await finishRefusal(tg, cardMessageId, slot, position, text);
+    if (prompt.date === today) await finishRefusal(tg, cardMessageId, slot, position, text);
     else await showStale(tg, cardMessageId, slot, position);
   } else if (prompt.action && (answers as readonly string[]).includes(prompt.action)) {
     const view = await day.today(tg.db, tg.user, now);
@@ -345,5 +422,4 @@ export async function onReply(tg: Tg, replyTo: number, text: string): Promise<bo
     if (task) await commitSurvey(tg, cardMessageId, task, prompt.action as Answer, text);
     else await continueSurvey(tg, view);
   }
-  return true;
 }

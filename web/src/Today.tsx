@@ -62,6 +62,13 @@ export function Today({ language, onSignedOut, ring }: Props) {
   const [notice, setNotice] = useState<TextKey>();
   // из бота кнопка «Выбрать» открывает страницу сразу в режиме выбора
   const [choosing, setChoosing] = useState(() => ring && new URLSearchParams(location.search).has("pick"));
+  // ?pick=1 действует один раз: после открытия он убирается из адреса, иначе выбор открывался бы снова
+  useEffect(() => {
+    const url = new URL(location.href);
+    if (!url.searchParams.has("pick")) return;
+    url.searchParams.delete("pick");
+    history.replaceState(null, "", url);
+  }, []);
 
   const load = useCallback(async () => {
     const result = await api<TodayView>("GET", "/today");
@@ -92,8 +99,10 @@ export function Today({ language, onSignedOut, ring }: Props) {
   const answer = async (row: PlanRow, choice: Answer, body?: unknown): Promise<boolean> => {
     const result = await api<TodayView>("POST", `/today/survey/${row.date}/${row.slot}/${row.position}/${choice}`, body ?? {});
     if (result.status === 401) onSignedOut();
-    if (result.data) setView(result.data);
-    else setFailed(true);
+    if (result.data) {
+      setView(result.data);
+      setFailed(false);
+    } else setFailed(true);
     return result.ok;
   };
 

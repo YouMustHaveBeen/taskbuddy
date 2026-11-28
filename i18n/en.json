@@ -118,6 +118,7 @@
   "bot.reminder": "Reminder: {title}",
   "bot.deadlineTomorrow": "Deadline tomorrow: {title}",
   "bot.stale": "This has changed, here is the current state",
+  "bot.list.done": "Done: {title}",
   "action.takeToday": "Take today",
   "action.remindTomorrow": "Remind again tomorrow"
 }

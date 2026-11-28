@@ -9,6 +9,8 @@ export const defaults = {
   itemTitleMaxLength: 4096,
   itemTextMaxLength: 1000,
   itemMaxSpheres: 3,
+  /** Поле на странице сохраняется после паузы в наборе (миллисекунды). */
+  typingSaveMs: 800,
   priorityWeights: { important: 2, impactful: 2, urgent: 1, easy: 1 },
   priorityLevels: { top: 5, high: 4, medium: 2, low: 1 },
   deadlineHorizonDays: 7,

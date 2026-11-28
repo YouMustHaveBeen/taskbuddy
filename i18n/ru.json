@@ -120,6 +120,7 @@
   "bot.reminder": "Напоминание: {title}",
   "bot.deadlineTomorrow": "Завтра дедлайн: {title}",
   "bot.stale": "Это уже изменилось, вот как сейчас",
+  "bot.list.done": "Сделано: {title}",
   "action.takeToday": "Взять сегодня",
   "action.remindTomorrow": "Напомнить снова завтра"
 }

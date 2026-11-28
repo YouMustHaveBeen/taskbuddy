@@ -88,6 +88,23 @@ export async function claimMarks(
   return claims.filter((_, index) => results[index].results.length > 0).map(({ userId, column }) => ({ userId, column }));
 }
 
+/**
+ * Возвращает отметку события, если отправка не удалась: следующий запуск расписания возьмет событие снова.
+ * Отметка возвращается, только если с тех пор ее никто не менял (первичный ключ users).
+ */
+export async function releaseMark(db: Db, userId: string, column: MarkColumn, claimed: string, previous: string | null): Promise<void> {
+  if (!markColumns.includes(column)) throw new Error("unknown mark column");
+  await db.$client
+    .prepare(`UPDATE users SET ${column} = ? WHERE id = ? AND ${column} = ?`)
+    .bind(previous, userId, claimed)
+    .run();
+}
+
+/** Возвращает напоминание, если отправка не удалась и его еще не задали заново (первичный ключ tasks). */
+export async function restoreReminder(db: Db, itemId: string, remindAt: number): Promise<void> {
+  await db.$client.prepare("UPDATE tasks SET remind_at = ? WHERE id = ? AND remind_at IS NULL").bind(remindAt, itemId).run();
+}
+
 /** Снимает наступившие напоминания; возвращает id тех, что снял этот запуск. Задачи по первичному ключу. */
 export async function claimReminders(db: Db, ids: string[], now: number): Promise<Set<string>> {
   if (ids.length === 0) return new Set();
@@ -125,12 +142,13 @@ export async function deadlinesBetween(db: Db, userId: string, from: number, to:
 
 /**
  * Ночная очистка одним batch: планы дня раньше `planBefore` (первичный ключ day_plan по диапазону дат),
- * истекшие «отложено до» задач владелицы (индекс items_owner_kind) и вопросы бота старше `promptsBefore`.
+ * истекшие «отложено до» задач владелицы (индекс items_owner_kind) и вопросы бота старше `promptsBefore`
+ * (первичный ключ bot_prompts по user_id). Возвращает сообщения удаленных вопросов, чтобы убрать их из чата.
  */
-export async function nightCleanup(db: Db, userId: string, planBefore: string, promptsBefore: number, now: number): Promise<void> {
+export async function nightCleanup(db: Db, userId: string, planBefore: string, promptsBefore: number, now: number): Promise<number[]> {
   const d1 = db.$client;
   // QUERY BUDGET EXCEPTION: три очистки — один batch раз в сутки
-  await d1.batch([
+  const results = await d1.batch([
     d1.prepare("DELETE FROM day_plan WHERE user_id = ? AND date < ?").bind(userId, planBefore),
     d1
       .prepare(
@@ -139,6 +157,7 @@ export async function nightCleanup(db: Db, userId: string, planBefore: string, p
           AND id IN (SELECT id FROM items WHERE owner_id = ? AND kind = 'task' AND archived_at IS NULL)`,
       )
       .bind(now, userId),
-    d1.prepare("DELETE FROM bot_prompts WHERE user_id = ? AND created_at < ?").bind(userId, promptsBefore),
+    d1.prepare("DELETE FROM bot_prompts WHERE user_id = ? AND created_at < ? RETURNING message_id").bind(userId, promptsBefore),
   ]);
+  return (results[2].results as { message_id: number }[]).map((row) => row.message_id);
 }

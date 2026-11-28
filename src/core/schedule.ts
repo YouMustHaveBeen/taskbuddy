@@ -6,6 +6,8 @@ import {
   deadlinesBetween,
   loadScheduleState,
   nightCleanup,
+  releaseMark,
+  restoreReminder,
   setReminder,
   type MarkColumn,
 } from "../db/schedule";
@@ -41,9 +43,16 @@ export function sameTimeTomorrow(original: number, now: number, timezone: string
   return fromZonedTime(`${addDays(localDate(now, timezone), 1)}T${time}`, timezone).getTime();
 }
 
+/** Взятая отметка события: при неудачной отправке она возвращается к прежнему значению. */
+export type Claim = { column: MarkColumn; date: string; previous: string | null };
+
 /** Что отправить пользователю в этот запуск расписания. */
 export type UserTick = {
   user: User;
+  /** Отметки отправляемых событий (утро, опрос, дедлайны) для возврата при ошибке отправки. */
+  claims: Partial<Record<"morning" | "survey" | "deadlines", Claim>>;
+  /** Вопросы бота, удаленные ночной очисткой: их сообщения убираются из чата. */
+  staleMessages?: number[];
   /** Вечерний опрос: принятые несделанные задачи. */
   survey?: TodayView;
   /** Утро: пять кнопок и список, если опрос пройден; иначе сначала вчерашний опрос (`reprompt`). */
@@ -52,6 +61,14 @@ export type UserTick = {
   deadlines?: string[];
 };
 export type Reminder = { user: User; itemId: string; title: string; remindAt: number };
+
+const previousOf: Record<MarkColumn, keyof User> = {
+  survey_on: "surveyOn",
+  morning_on: "morningOn",
+  reprompt_on: "repromptOn",
+  deadline_on: "deadlineOn",
+  night_on: "nightOn",
+};
 
 const markOf: Record<Exclude<ScheduleEvent, "morning">, MarkColumn> = {
   survey: "survey_on",
@@ -78,11 +95,13 @@ export const schedule = {
 
     const ticks: UserTick[] = [];
     for (const { user, events: list } of due) {
-      const tick: UserTick = { user };
+      const tick: UserTick = { user, claims: {} };
       const date = localDate(now, user.timezone);
+      const claim = (column: MarkColumn): Claim => ({ column, date, previous: user[previousOf[column]] as string | null });
       if (has(user.id, "night_on")) {
         const promptsBefore = now - defaults.botPromptKeepHours * 3_600_000;
-        await nightCleanup(db, user.id, addDays(date, -defaults.dayPlanKeepDays), promptsBefore, now);
+        const stale = await nightCleanup(db, user.id, addDays(date, -defaults.dayPlanKeepDays), promptsBefore, now);
+        if (stale.length > 0) tick.staleMessages = stale;
       }
       if (list.includes("morning")) {
         const view = await day.today(db, user, now);
@@ -90,19 +109,29 @@ export const schedule = {
         const won = reprompt
           ? (user.repromptOn ?? "") < date && (await claimMarks(db, [{ userId: user.id, column: "reprompt_on", date }])).length > 0
           : await schedule.claimMorning(db, user, now);
-        if (won) tick.morning = { view, reprompt };
+        if (won) {
+          tick.morning = { view, reprompt };
+          tick.claims.morning = claim(reprompt ? "reprompt_on" : "morning_on");
+        }
       }
       if (has(user.id, "deadline_on")) {
         const tomorrow = addDays(date, 1);
         const from = startOfLocalDay(tomorrow, user.timezone);
         const titles = await deadlinesBetween(db, user.id, from, startOfLocalDay(addDays(tomorrow, 1), user.timezone));
-        if (titles.length > 0) tick.deadlines = titles;
+        if (titles.length > 0) {
+          tick.deadlines = titles;
+          tick.claims.deadlines = claim("deadline_on");
+        }
       }
-      if (has(user.id, "survey_on")) {
+      // утреннее «Сначала вчерашний опрос» уже присылает первый вопрос опроса: второй раз он не нужен
+      if (has(user.id, "survey_on") && !tick.morning?.reprompt) {
         const view = await day.today(db, user, now);
-        if (view.survey.length > 0) tick.survey = view;
+        if (view.survey.length > 0) {
+          tick.survey = view;
+          tick.claims.survey = claim("survey_on");
+        }
       }
-      if (tick.morning || tick.deadlines || tick.survey) ticks.push(tick);
+      if (tick.morning || tick.deadlines || tick.survey || tick.staleMessages) ticks.push(tick);
     }
 
     const owners = new Map(state.users.map((user) => [user.id, user]));
@@ -124,6 +153,16 @@ export const schedule = {
     if (localTime(now, user.timezone) < defaults.morningAt) return false;
     const date = localDate(now, user.timezone);
     return (await claimMarks(db, [{ userId: user.id, column: "morning_on", date }])).length > 0;
+  },
+
+  /** Отправка не удалась: отметка события возвращается, и следующий запуск расписания отправит его снова. */
+  async release(db: Db, userId: string, claim: Claim): Promise<void> {
+    await releaseMark(db, userId, claim.column, claim.date, claim.previous);
+  },
+
+  /** Отправка напоминания не удалась: напоминание возвращается и придет в следующий запуск. */
+  async restoreReminder(db: Db, itemId: string, remindAt: number): Promise<void> {
+    await restoreReminder(db, itemId, remindAt);
   },
 
   /** «Напомнить снова завтра»: напоминание в то же время на следующий день. */

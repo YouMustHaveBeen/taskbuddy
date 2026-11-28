@@ -93,6 +93,9 @@ describe("бот: пять кнопок и карточка задачи", () =>
     const user = await env.DB.prepare("SELECT list_message_id FROM users WHERE id = ?").bind(ann.id).first<{ list_message_id: number }>();
     expect(user?.list_message_id).toBe(1);
 
+    const list = sent("sendMessage").at(-1)!;
+    expect(buttons(list).map((b) => [b.text, b.callback_data])).toEqual([["Сделано: позвонить маме", `l|${D}|important|0`]]);
+
     await press(`d|${D}|important|0|done`);
     expect(sent("deleteMessage").at(-1)!.payload.message_id).toBe(1);
     expect(sent("sendMessage").at(-1)!.payload.text).toBe("Список на сегодня\n\n✓ позвонить маме");
@@ -164,5 +167,47 @@ describe("бот: вечерний опрос и напоминания", () => 
     await press(`r|a|${id}|${Date.parse("2026-11-10T11:00:00Z")}`, 71, "Напоминание: позвонить");
     const task = await env.DB.prepare("SELECT remind_at FROM tasks WHERE id = ?").bind(id).first<{ remind_at: number }>();
     expect(task?.remind_at).toBe(Date.parse("2026-11-11T11:00:00Z"));
+  });
+
+  it("«Сделано» в списке отмечает задачу ✓ и присылает список заново", async () => {
+    const id = await insertTask("позвонить");
+    await press(`r|t|${id}`, 70, "Напоминание: позвонить");
+    await press(`l|${D}|picked|0`, 1);
+    const list = sent("sendMessage").at(-1)!;
+    expect(list.payload.text).toBe("Список на сегодня\n\n✓ позвонить");
+    expect(buttons(list)).toEqual([]);
+  });
+
+  it("кнопка напоминания, которая не сработала, не ставит ✓; пока вчерашний опрос не пройден, сначала он", async () => {
+    const gone = await insertTask("удаленная");
+    await env.DB.prepare("UPDATE items SET archived_at = 1 WHERE id = ?").bind(gone).run();
+    await press(`r|a|${gone}|${Date.parse("2026-11-10T11:00:00Z")}`, 71, "Напоминание: удаленная");
+    expect(sent("editMessageText").at(-1)!.payload.text).toBe("Напоминание: удаленная\n\nЭто уже изменилось, вот как сейчас");
+
+    const yesterday = await insertTask("вчерашняя");
+    await env.DB.prepare(
+      "INSERT INTO day_plan (user_id, date, slot, position, item_id, state, hidden, created_at) VALUES (?, '2026-11-09', 'picked', 0, ?, 'accepted', 0, 0)",
+    )
+      .bind(ann.id, yesterday)
+      .run();
+    const id = await insertTask("позвонить");
+    const edits = sent("editMessageText").length;
+    await press(`r|t|${id}`, 72, "Напоминание: позвонить");
+    expect(sent("editMessageText")).toHaveLength(edits);
+    expect(sent("sendMessage").map((c) => c.payload.text)).toContain("Сначала вчерашний опрос");
+    const plan = await env.DB.prepare("SELECT count(*) AS n FROM day_plan WHERE item_id = ?").bind(id).first<{ n: number }>();
+    expect(plan?.n).toBe(0);
+  });
+
+  it("причина отказа, присланная после полуночи, не записывается в сегодняшний план", async () => {
+    await env.DB.prepare(
+      "INSERT INTO bot_prompts (user_id, message_id, card_message_id, kind, date, slot, position, created_at) VALUES (?, 40, 30, 'reason', '2026-11-09', 'important', 0, 0)",
+    )
+      .bind(ann.id)
+      .run();
+    await insertTask("задача", { important: 1, why: "x" });
+    await reply("устала", 40);
+    const notes = await env.DB.prepare("SELECT count(*) AS n FROM tasks WHERE refusal_note IS NOT NULL").first<{ n: number }>();
+    expect(notes?.n).toBe(0);
   });
 });

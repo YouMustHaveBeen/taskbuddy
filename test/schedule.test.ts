@@ -103,8 +103,35 @@ describe("запуск расписания", () => {
 
   it("утро без опроса: пять кнопок с времени утра", async () => {
     await markAll(D);
+    for (let i = 0; i < 4; i++) await insertTask(`задача ${i}`, { important: 1, urgent: 1, impactful: 1, easy: 1, why: "x" });
     expect((await schedule.tick(db(), at(NEXT, "08:55"))).users.some((user) => user.morning)).toBe(false);
-    expect((await schedule.tick(db(), at(NEXT, "09:00"))).users[0].morning?.reprompt).toBe(false);
+    const morning = (await schedule.tick(db(), at(NEXT, "09:00"))).users[0].morning;
+    expect(morning?.reprompt).toBe(false);
+    expect(Object.keys(morning!.view.buttons).sort()).toEqual(["easy", "impactful", "important", "urgent"]);
+  });
+
+  it("первый запуск после 21:00 при непройденном вчерашнем опросе присылает опрос один раз", async () => {
+    await markAll(D);
+    await accept(await insertTask("вчерашняя"), D);
+    const tick = (await schedule.tick(db(), at(NEXT, "21:05"))).users[0];
+    expect(tick.morning?.reprompt).toBe(true);
+    expect(tick.survey).toBeUndefined();
+  });
+
+  it("неудачная отправка возвращает отметку события и напоминание: следующий запуск отправляет снова", async () => {
+    await markAll(D);
+    const id = await insertTask("позвонить", { remind_at: at(NEXT, "09:00") });
+    const first = await schedule.tick(db(), at(NEXT, "09:00"));
+    const tick = first.users[0];
+    expect(tick.claims.morning).toEqual({ column: "morning_on", date: NEXT, previous: D });
+    expect(first.reminders).toHaveLength(1);
+    expect((await schedule.tick(db(), at(NEXT, "09:05"))).users).toEqual([]);
+
+    await schedule.release(db(), ann.id, tick.claims.morning!);
+    await schedule.restoreReminder(db(), id, at(NEXT, "09:00"));
+    const again = await schedule.tick(db(), at(NEXT, "09:10"));
+    expect(again.users[0].morning?.reprompt).toBe(false);
+    expect(again.reminders).toMatchObject([{ itemId: id }]);
   });
 
   it("накануне дедлайна — названия задач с дедлайном завтра", async () => {
@@ -144,7 +171,9 @@ describe("запуск расписания", () => {
       env.DB.prepare("INSERT INTO day_plan (user_id, date, slot, position, item_id, state, created_at) VALUES (?, '2026-10-20', 'picked', 0, ?, 'done', 0)").bind(ann.id, old),
       env.DB.prepare("INSERT INTO bot_prompts (user_id, message_id, card_message_id, kind, date, slot, position, created_at) VALUES (?, 5, 4, 'blocks', ?, 'important', 0, ?)").bind(ann.id, D, at("2026-11-09", "01:00")),
     ]);
-    await schedule.tick(db(), at(NEXT, "03:00"));
+    const night = await schedule.tick(db(), at(NEXT, "03:00"));
+    // сообщение удаленного вопроса убирается и из чата
+    expect(night.users[0].staleMessages).toEqual([5]);
     const plans = await env.DB.prepare("SELECT date FROM day_plan").all<{ date: string }>();
     expect(plans.results.map((row) => row.date)).toEqual(["2026-10-20"]);
     const flags = await env.DB.prepare("SELECT id, deferred FROM tasks WHERE id IN (?, ?)").bind(deferred, later).all<{ id: string; deferred: number }>();

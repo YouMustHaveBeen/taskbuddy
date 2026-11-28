@@ -97,6 +97,9 @@ describe("вечерний опрос", () => {
     await accepted(ann.id, id, D);
     const result = await day.survey(db(), ann, at(D, "21:30"), { date: D, slot: "picked", position: 0, answer: "tomorrow" }, undefined);
     expect(result.today?.survey).toEqual([]);
+    // перенесенная задача уходит из сегодняшнего списка: кнопки «Сделано» у нее больше нет
+    expect(result.today?.picked).toEqual([]);
+    expect(result.today?.list).toEqual([]);
     const next = await day.today(db(), ann, at(NEXT, "09:00"));
     expect(next.locked).toBe(false);
     expect(next.picked).toMatchObject([{ itemId: id, state: "accepted", date: NEXT }]);
@@ -130,11 +133,15 @@ describe("вечерний опрос", () => {
   });
 
   it("на третьей неудаче задача становится лягушкой, а в план следующего дня шестой задачей встает «Подумай, почему откладываешь»", async () => {
+    for (let i = 0; i < 6; i++) await insertTask(ann.id, `задача ${i}`, { important: 1, urgent: 1, impactful: 1, easy: 1, why: "нужно" });
     const id = await insertTask(ann.id, "разобрать шкаф", { skip_count: 2 });
     await accepted(ann.id, id, D);
     await day.survey(db(), ann, at(D, "21:30"), { date: D, slot: "picked", position: 0, answer: "back" }, undefined);
     expect(await task(id)).toMatchObject({ skip_count: 3, flavor: "frog", frog_auto: 1 });
     const next = await day.today(db(), ann, at(NEXT, "09:00"));
+    // пять задач «Выдай мне дело» (четыре кнопки и «Выбрать») составлены, «Подумай…» — шестая, сверх них
+    expect(Object.keys(next.buttons)).toHaveLength(4);
+    expect(Object.values(next.buttons).some((row) => row?.itemId === id)).toBe(false);
     expect(next.picked).toMatchObject([{ slot: "think", state: "accepted", title: "Подумай, почему откладываешь: разобрать шкаф" }]);
 
     const done = await day.act(db(), ann, at(NEXT, "10:00"), { slot: "think", position: 0, action: "done" }, undefined);

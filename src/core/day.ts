@@ -242,7 +242,10 @@ function view(date: string, plan: PlanRow[], now: number, timezone: string): Tod
     }
     if (row.date !== date || locked) continue;
     if (row.slot === "deadline") result.deadlines.push(task);
-    else if (row.slot === "picked" || row.slot === "think") result.picked.push(task);
+    else if (row.slot === "picked" || row.slot === "think") {
+      // перенесенная опросом, возвращенная в хранилище или удаленная задача в сегодняшнем плане не показывается
+      if (row.state === "accepted" || row.state === "done") result.picked.push(task);
+    }
     else if ((buttonSlots as readonly string[]).includes(row.slot)) result.buttons[row.slot as ButtonSlot] = task;
     if (row.slot !== "deadline" && (row.state === "accepted" || row.state === "done")) result.list.push(task);
     if (row.state === "done" && row.slot !== "deadline") result.done += 1;
@@ -407,6 +410,8 @@ export const day = {
     const date = localDate(now, user.timezone);
     // пустой план составляется без выбранной задачи
     const plan = await planOfDay(db, user, date, now, Math.random, itemId);
+    // пока опрос прошлого дня не пройден, новые задачи в план не добавляются: в ответе — день с опросом
+    if (isLocked(plan, date)) return { outcome: "invalid", today: view(date, plan, now, user.timezone) };
     const inToday = (rows: PlanRow[]) => rows.some((row) => row.date === date && row.itemId === itemId);
     if (inToday(plan)) return { outcome: "invalid" };
     const written = await addPickedRow(db, user.id, date, itemId, now);
