@@ -8,6 +8,11 @@ export async function findUserByTelegramId(db: Db, telegramId: number): Promise<
   return db.select().from(users).where(eq(users.telegramId, telegramId)).get();
 }
 
+/** Пользователь по id (первичный ключ). */
+export async function findUserById(db: Db, id: string): Promise<User | undefined> {
+  return db.select().from(users).where(eq(users.id, id)).get();
+}
+
 export async function createFirstUser(db: Db, user: User): Promise<User | undefined> {
   const noUsers = "WHERE NOT EXISTS (SELECT 1 FROM users)";
   const d1 = db.$client;

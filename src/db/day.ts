@@ -182,14 +182,26 @@ async function write(
   key: Pick<PlanKey, "userId" | "date">,
   statements: D1PreparedStatement[],
   guard = 0,
+  timerOf?: PlanKey,
 ): Promise<PlanWrite> {
   // QUERY BUDGET EXCEPTION: записи действия и чтение плана — один batch
   const d1 = db.$client;
-  const results = await d1.batch([...statements, d1.prepare(planSql).bind(key.userId, key.date)]);
+  const drop = timerOf ? [dropTimerStatement(db, timerOf)] : [];
+  const results = await d1.batch([...statements, ...drop, d1.prepare(planSql).bind(key.userId, key.date)]);
   return {
     changed: results[guard].meta.changes,
     plan: planFromRaw(results[results.length - 1].results as PlanRaw[]),
   };
+}
+
+/** Снимает таймер задачи строки плана, если строка больше не ждет работы (выполнена, возвращена, закрыта, ответ опроса). */
+function dropTimerStatement(db: Db, key: PlanKey): D1PreparedStatement {
+  return db.$client
+    .prepare(
+      `DELETE FROM timers WHERE user_id = ? AND kind = 'task'
+        AND item_id IN (SELECT item_id FROM day_plan WHERE ${keyWhere} AND state NOT IN ('offered', 'accepted'))`,
+    )
+    .bind(key.userId, ...keyArgs(key));
 }
 
 const states = (list: PlanState[]) => `(${list.map((state) => `'${state}'`).join(", ")})`;
@@ -205,9 +217,13 @@ export function revealRow(db: Db, key: PlanKey, now: number): Promise<PlanWrite>
 }
 
 export function setRowState(db: Db, key: PlanKey, from: PlanState[], to: PlanState): Promise<PlanWrite> {
-  return write(db, key, [
-    db.$client.prepare(`UPDATE day_plan SET state = ? WHERE ${keyWhere} AND state IN ${states(from)}`).bind(to, ...keyArgs(key)),
-  ]);
+  return write(
+    db,
+    key,
+    [db.$client.prepare(`UPDATE day_plan SET state = ? WHERE ${keyWhere} AND state IN ${states(from)}`).bind(to, ...keyArgs(key))],
+    0,
+    key,
+  );
 }
 
 /** «Сделано»: строка плана в «выполнено» и задача в архив как выполненная. */
@@ -221,7 +237,7 @@ export function completeRow(db: Db, key: PlanKey, from: PlanState[], now: number
         WHERE changes() > 0 AND owner_id = ? AND archived_at IS NULL AND id = ${itemOfRow}`,
       )
       .bind(now, now, key.userId, ...keyArgs(key)),
-  ]);
+  ], 0, key);
 }
 
 /** Причина отказа записывается в карточку задачи, от которой отказались. */
@@ -394,7 +410,35 @@ export function answerSurvey(
       .prepare(`UPDATE day_plan SET state = ? WHERE ${keyWhere} AND state = 'accepted'`)
       .bind(surveyStates[answer], ...keyArgs(key)),
   );
-  return write(db, { userId: key.userId, date: today }, statements, guard);
+  return write(db, { userId: key.userId, date: today }, statements, guard, key);
+}
+
+/**
+ * «Вернуть» после таймера: задача из строки плана уходит в хранилище, и это неудача (см. failStatements);
+ * ответ «Что мешает?» (если есть) идет в инсайты, а слот кнопки получает замену `replacement`. Строка ждет
+ * ответа, пока она в одном из `from`.
+ */
+export function returnRow(
+  db: Db,
+  key: PlanKey,
+  itemId: string,
+  from: PlanState[],
+  replacement: string | undefined,
+  insight: { id: string; text: string } | undefined,
+  frog: { at: number; think: ThinkTask },
+  now: number,
+): Promise<PlanWrite> {
+  const d1 = db.$client;
+  const pending = {
+    sql: `EXISTS (SELECT 1 FROM day_plan r WHERE r.user_id = ? AND r.date = ? AND r.slot = ? AND r.position = ? AND r.state IN ${states(from)})`,
+    args: keyArgs(key),
+  };
+  const statements = failStatements(db, key.userId, itemId, key.date, pending, frog.at, frog.think, now);
+  if (insight) statements.push(insightStatement(db, key.userId, insight, pending));
+  const guard = statements.length;
+  statements.push(d1.prepare(`UPDATE day_plan SET state = 'returned' WHERE ${keyWhere} AND state IN ${states(from)}`).bind(...keyArgs(key)));
+  if (replacement) statements.push(...nextRowStatements(db, key, replacement, ["returned"], 1, now));
+  return write(db, key, statements, guard, key);
 }
 
 /** «Выбрать»: выбранная вручную задача сразу принята; задача, которая сегодня уже в плане (в любом состоянии), не вставляется (индекс day_plan_item). */

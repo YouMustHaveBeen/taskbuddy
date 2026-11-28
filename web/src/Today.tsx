@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { t, type Language, type TextKey } from "../../i18n";
 import { api } from "./api";
 import { Tasks } from "./Tasks";
+import { TimerButton, TimerPanel, type TimerReply, type TimerView } from "./Timer";
 
 type Slot = "important" | "urgent" | "impactful" | "easy";
 type Pause = "deferred" | "queued" | "waiting";
@@ -29,6 +30,7 @@ type TodayView = {
   locked: boolean;
   done: number;
   ringTasks: number;
+  timer: TimerView | null;
 };
 type Answer = "tomorrow" | "back" | "drop";
 type Step = "why" | "write" | "blocks";
@@ -60,6 +62,9 @@ export function Today({ language, onSignedOut, ring }: Props) {
   const [view, setView] = useState<TodayView>();
   const [failed, setFailed] = useState(false);
   const [notice, setNotice] = useState<TextKey>();
+  const [busy, setBusy] = useState(false);
+  /** План дня из ответа действия (без таймера): таймер остается прежним. */
+  const setPlan = (plan: Omit<TodayView, "timer">) => setView((current) => ({ ...plan, timer: current?.timer ?? null }));
   // из бота кнопка «Выбрать» открывает страницу сразу в режиме выбора
   const [choosing, setChoosing] = useState(() => ring && new URLSearchParams(location.search).has("pick"));
   // после открытия ?pick=1 убирается из адреса
@@ -81,16 +86,45 @@ export function Today({ language, onSignedOut, ring }: Props) {
 
   useEffect(() => {
     void load();
+    // страница снова на экране (например, после бота): план и таймер перечитываются
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
   }, [load]);
 
-  /** Действие над строкой плана; в ответе приходит свежий план. */
+  /** Ответ таймера: новый таймер и, после кнопок завершения, свежий план дня. */
+  const onTimer = (reply: TimerReply<Omit<TodayView, "timer">>) => {
+    setView((current) => (current ? { ...current, ...(reply.today ?? {}), timer: reply.timer } : current));
+    setFailed(false);
+  };
+
+  const timerFailed = (status?: number) => {
+    if (status === 401) onSignedOut();
+    // таймер уже изменился (например, в боте): план и таймер перечитываются
+    if (status === 400 || status === 404 || status === 409) void load();
+    else setFailed(true);
+  };
+
+  /** «Таймер» у задачи; если уже идет другой таймер, показывается он и «Уже идет таймер». */
+  const startTimer = async (row: PlanRow, minutes: number) => {
+    const result = await api<TimerReply<never>>("POST", `/timer/start/${row.slot}/${row.position}/${minutes}`, {});
+    setBusy(result.status === 409);
+    if (result.data) onTimer(result.data);
+    else timerFailed(result.status);
+  };
+
+  /** Действие над строкой плана; в ответе приходит свежий план («Сделано» снимает таймер задачи). */
   const run = async (slot: string, position: number, action: string, body?: unknown): Promise<boolean> => {
     const result = await api<TodayView>("POST", `/today/${slot}/${position}/${action}`, body ?? {});
+    // действие могло снять таймер задачи: план и таймер перечитываются
+    if (result.data && view?.timer) void load();
     if (result.status === 401) onSignedOut();
     setNotice(
       result.status === 409 ? (action === "dopamine" ? "today.noDopamine" : "today.noMore") : undefined,
     );
-    if (result.data) setView(result.data);
+    if (result.data) setPlan(result.data);
     else if (result.status !== 409) setFailed(true);
     return result.ok;
   };
@@ -100,7 +134,7 @@ export function Today({ language, onSignedOut, ring }: Props) {
     const result = await api<TodayView>("POST", `/today/survey/${row.date}/${row.slot}/${row.position}/${choice}`, body ?? {});
     if (result.status === 401) onSignedOut();
     if (result.data) {
-      setView(result.data);
+      setPlan(result.data);
       setFailed(false);
     } else setFailed(true);
     return result.ok;
@@ -110,7 +144,7 @@ export function Today({ language, onSignedOut, ring }: Props) {
     const result = await api<TodayView>("POST", "/today/pick", { itemId });
     if (result.status === 401) onSignedOut();
     if (result.data) {
-      setView(result.data);
+      setPlan(result.data);
       setChoosing(false);
       setNotice(undefined);
     } else if (result.status === 400) {
@@ -141,6 +175,20 @@ export function Today({ language, onSignedOut, ring }: Props) {
       {!view.locked && ring && (
         <Ring done={view.done} total={view.ringTasks} label={text("today.progress", { done: view.done, total: view.ringTasks })} />
       )}
+      {busy && view.timer && <p className="hint">{text("timer.busy", { title: view.timer.title })}</p>}
+      {view.timer && (
+        <TimerPanel<Omit<TodayView, "timer">>
+          key={`${view.timer.itemId}-${view.timer.startedAt}`}
+          timer={view.timer}
+          text={text}
+          askBlocks={workRows(view).some((row) => row.itemId === view.timer?.itemId && row.askBlocks && row.flavor !== "dopamine")}
+          onReply={(reply) => {
+            setBusy(false);
+            onTimer(reply);
+          }}
+          onFailed={timerFailed}
+        />
+      )}
       {empty && <p className="empty">{text("list.empty")}</p>}
       {view.deadlines.length > 0 && (
         <div className="block">
@@ -154,9 +202,12 @@ export function Today({ language, onSignedOut, ring }: Props) {
                   {row.pause && <span className="meta">{text(pauseLabels[row.pause])}</span>}
                 </span>
                 {row.state !== "done" && (
-                  <button type="button" onClick={() => void run("deadline", row.position, "done")}>
-                    {text("action.done")}
-                  </button>
+                  <span className="actions">
+                    <button type="button" onClick={() => void run("deadline", row.position, "done")}>
+                      {text("action.done")}
+                    </button>
+                    <TimerButton text={text} onStart={(minutes) => void startTimer(row, minutes)} />
+                  </span>
                 )}
               </li>
             ))}
@@ -167,7 +218,7 @@ export function Today({ language, onSignedOut, ring }: Props) {
         <h2>{text("today.fiveTasks")}</h2>
         <div className="slots">
           {slots.map((slot) => (
-            <SlotCard key={slot} slot={slot} row={view.buttons[slot]} text={text} run={run} />
+            <SlotCard key={slot} slot={slot} row={view.buttons[slot]} text={text} run={run} startTimer={startTimer} />
           ))}
           <button type="button" onClick={() => setChoosing(!choosing)} aria-expanded={choosing}>
             {text("slot.pick")}
@@ -180,9 +231,12 @@ export function Today({ language, onSignedOut, ring }: Props) {
               <li key={`${row.slot}-${row.position}`} className="row today-row">
                 <span className={row.state === "done" ? "done" : undefined}>{row.title}</span>
                 {row.state !== "done" && (
-                  <button type="button" onClick={() => void run(row.slot, row.position, "done")}>
-                    {text("action.done")}
-                  </button>
+                  <span className="actions">
+                    <button type="button" onClick={() => void run(row.slot, row.position, "done")}>
+                      {text("action.done")}
+                    </button>
+                    {row.state === "accepted" && <TimerButton text={text} onStart={(minutes) => void startTimer(row, minutes)} />}
+                  </span>
                 )}
               </li>
             ))}
@@ -266,8 +320,14 @@ function Ring(props: { done: number; total: number; label: string }) {
 type Text = (key: TextKey, params?: Record<string, string | number>) => string;
 type Run = (slot: string, position: number, action: string, body?: unknown) => Promise<boolean>;
 
-function SlotCard(props: { slot: Slot; row?: PlanRow; text: Text; run: Run }) {
-  const { slot, row, text, run } = props;
+/** Строки плана, у задачи которых может идти таймер: принятые несделанные и блок дедлайнов. */
+function workRows(view: TodayView): PlanRow[] {
+  const rows = [...view.deadlines, ...view.picked, ...Object.values(view.buttons)];
+  return rows.filter((row) => row.state === "accepted" || (row.slot === "deadline" && row.state === "offered"));
+}
+
+function SlotCard(props: { slot: Slot; row?: PlanRow; text: Text; run: Run; startTimer: (row: PlanRow, minutes: number) => Promise<void> }) {
+  const { slot, row, text, run, startTimer } = props;
   const [step, setStep] = useState<Step>();
   const label = text(slotLabels[slot]);
   if (!row) return <button type="button" disabled>{label}</button>;
@@ -331,6 +391,7 @@ function SlotCard(props: { slot: Slot; row?: PlanRow; text: Text; run: Run }) {
               {text("action.close")}
             </button>
           )}
+          <TimerButton text={text} onStart={(minutes) => void startTimer(row, minutes)} />
         </div>
       </div>
     );

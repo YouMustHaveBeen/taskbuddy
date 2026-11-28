@@ -296,7 +296,7 @@ export const botPrompts = sqliteTable(
     userId: userRef(),
     messageId: integer("message_id").notNull(),
     cardMessageId: integer("card_message_id").notNull(),
-    kind: text("kind", { enum: ["reason", "blocks", "survey"] }).notNull(),
+    kind: text("kind", { enum: ["reason", "blocks", "survey", "return", "park"] }).notNull(),
     date: text("date").notNull(),
     slot: text("slot").notNull(),
     position: integer("position").notNull(),
@@ -305,3 +305,24 @@ export const botPrompts = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.userId, t.messageId] })],
 );
+
+/**
+ * Таймер пользователя (один на пользователя). Идет: ends_at; на паузе: paused_at и remaining_sec;
+ * остановлен или время вышло: ends_at и paused_at пусты, ждет одной из четырех кнопок.
+ */
+export const timers = sqliteTable("timers", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id),
+  kind: text("kind", { enum: ["task", "zone", "reward"] }).notNull(),
+  itemId: text("item_id")
+    .notNull()
+    .references(() => items.id, { onDelete: "cascade" }),
+  minutes: integer("minutes").notNull(),
+  startedAt: integer("started_at").notNull(),
+  pausedAt: integer("paused_at"),
+  remainingSec: integer("remaining_sec"),
+  endsAt: integer("ends_at"),
+  startedIn: text("started_in", { enum: ["bot", "web"] }).notNull(),
+  botMessageId: integer("bot_message_id"),
+});

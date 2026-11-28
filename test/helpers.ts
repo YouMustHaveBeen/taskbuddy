@@ -17,6 +17,7 @@ export async function call(path: string, init: RequestInit = {}): Promise<Respon
 export async function resetDb(): Promise<void> {
   await env.DB.batch(
     [
+      "timers",
       "bot_prompts",
       "day_plan",
       "insight_spheres",

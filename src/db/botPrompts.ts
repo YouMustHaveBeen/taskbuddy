@@ -5,7 +5,7 @@ export type BotPrompt = {
   userId: string;
   messageId: number;
   cardMessageId: number;
-  kind: "reason" | "blocks" | "survey";
+  kind: "reason" | "blocks" | "survey" | "return" | "park";
   date: string;
   slot: string;
   position: number;

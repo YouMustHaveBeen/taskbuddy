@@ -22,3 +22,11 @@ binding = "DB"
 database_name = "taskbuddy"
 database_id = "bb10ce79-5898-403d-8211-7ee00b0d5df9"
 migrations_dir = "migrations"
+
+[[durable_objects.bindings]]
+name = "TIMERS"
+class_name = "TimerAlarm"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["TimerAlarm"]

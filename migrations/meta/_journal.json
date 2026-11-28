@@ -36,6 +36,13 @@
       "when": 1795824406381,
       "tag": "0004_bot_schedule",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1795873785069,
+      "tag": "0005_timers",
+      "breakpoints": true
     }
   ]
 }

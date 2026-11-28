@@ -7,6 +7,7 @@ import {
   answerSurvey,
   completeRow,
   finishRefusal,
+  returnRow,
   loadPlan,
   planCandidates,
   revealRow,
@@ -258,10 +259,20 @@ function view(date: string, plan: PlanRow[], now: number, timezone: string): Tod
 
 export type DayOutcome = "ok" | "invalid" | "not_found" | "none";
 export type DayResult = { outcome: DayOutcome; today?: TodayView };
-export type DayAction = "reveal" | "accept" | "refuse" | "reason" | "next" | "done" | "refresh" | "dopamine" | "release";
+export type DayAction =
+  | "reveal"
+  | "accept"
+  | "refuse"
+  | "reason"
+  | "next"
+  | "done"
+  | "refresh"
+  | "dopamine"
+  | "release"
+  | "return";
 export type DayUser = { id: string; timezone: string; language: string };
 
-const actions: readonly string[] = ["reveal", "accept", "refuse", "reason", "next", "done", "refresh", "dopamine", "release"];
+const actions: readonly string[] = ["reveal", "accept", "refuse", "reason", "next", "done", "refresh", "dopamine", "release", "return"];
 const planSlots: readonly string[] = ["deadline", "picked", "think", ...buttonSlots];
 const surveyAnswers: readonly string[] = ["tomorrow", "back", "drop"];
 /** Слоты, которые заполняет составление плана; план с одними перенесенными задачами еще не составлен. */
@@ -327,7 +338,8 @@ export const day = {
    * reveal — показать задачу за кнопкой; accept — принять (после отказа — «Все же взять»); refuse — отказаться;
    * reason — записать причину отказа в карточку; next — завершить отказ (счетчик отказов, «Что мешает?», замена);
    * done — выполнено, задача в архив; refresh и dopamine — новая задача на месте выполненной;
-   * release — «Пропустить» или «Закрыть» у дофаминовой задачи.
+   * release — «Пропустить» или «Закрыть» у дофаминовой задачи; return — «Вернуть» после таймера: задача
+   * в хранилище (неудача, «Что мешает?» в `blocks`, замена за кнопкой), у дофаминовой — как «Закрыть».
    */
   async act(
     db: Db,
@@ -401,6 +413,23 @@ export const day = {
       case "release":
         if (!isButton || !dopamine || row.hidden) return { outcome: "invalid" };
         return finish(await setRowState(db, key, ["offered", "accepted"], "closed"));
+      case "return": {
+        const from: PlanState[] = slot === "deadline" ? ["offered", "accepted"] : ["accepted"];
+        if (row.hidden || row.archived || !from.includes(row.state)) return { outcome: "invalid" };
+        if (dopamine) return finish(await setRowState(db, key, from, "closed"));
+        const blocks = blocksText(fields.blocks);
+        if (blocks === null) return { outcome: "invalid" };
+        const used = new Set(plan.map((other) => other.itemId));
+        const replacement =
+          isButton && row.replacements < defaults.refusalReplacements
+            ? await usable(db, user.id, now, used, (candidates) =>
+                pickForSlot(candidates, slot as ButtonSlot, used, now, random),
+              )
+            : undefined;
+        const insight = blocks && asksBlocks(row) ? { id: crypto.randomUUID(), text: blocks } : undefined;
+        const frog = frogFor(user, row.title, addDays(date, 1));
+        return finish(await returnRow(db, key, row.itemId, from, replacement?.id, insight, frog, now));
+      }
     }
   },
 

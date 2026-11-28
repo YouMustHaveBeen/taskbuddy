@@ -7,6 +7,7 @@ import { insightRoutes } from "./insights";
 import { itemRoutes } from "./items";
 import { referenceRoutes } from "./references";
 import { requireUser, type ApiEnv } from "./session";
+import { timerRoutes } from "./timer";
 
 export const apiRoutes = new Hono<ApiEnv>();
 
@@ -22,6 +23,7 @@ apiRoutes.route("/references", referenceRoutes);
 apiRoutes.route("/", itemRoutes);
 apiRoutes.route("/", dayRoutes);
 apiRoutes.route("/", insightRoutes);
+apiRoutes.route("/", timerRoutes);
 
 async function bodyField(c: Context, name: string): Promise<unknown> {
   const body: unknown = await c.req.json().catch(() => undefined);

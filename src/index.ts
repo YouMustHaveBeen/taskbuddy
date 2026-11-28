@@ -9,6 +9,8 @@ const app = new Hono<{ Bindings: Env }>();
 app.route("/api", apiRoutes);
 app.route("/tg", telegramRoutes);
 
+export { TimerAlarm } from "./jobs/timerAlarm";
+
 export default {
   fetch: app.fetch,
   scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
