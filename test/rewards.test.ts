@@ -249,7 +249,7 @@ describe("награды и первый шаг в боте", () => {
     await press(`l|${D}|important|0`);
     expect(sent("sendMessage").at(-1)!.payload.text).toBe("Список на сегодня\n\n✓ позвонить маме\n🏆 планка");
 
-    // план дня уже составлен: длинная задача берется на сегодня кнопкой напоминания
+    // длинная задача берется на сегодня кнопкой напоминания
     const long = await insertTask("х".repeat(4090));
     await press(`r|t|${long}`);
     const text = String(sent("sendMessage").at(-1)!.payload.text);
