@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLoginLink, registerByInvite, signInByLink, userBySession } from "../src/core/auth";
 import { defaults } from "../src/core/settings";
 import { createDb } from "../src/db/client";
-import { call, mockTelegram, resetDb, sendUpdate, signInitData } from "./helpers";
+import { call, mockTelegram, resetDb, sendUpdate } from "./helpers";
 
 const db = createDb(env.DB);
 const ann = { telegramId: 1001, name: "Ann", languageCode: "ru" };
@@ -126,9 +126,12 @@ describe("вебхук Telegram", () => {
     const calls = mockTelegram();
     await sendUpdate(`/start ${env.OWNER_INVITE_CODE}`);
     await sendUpdate("/web");
-    const text = String(calls.filter((c) => c.method === "sendMessage")[1]?.payload.text);
-    expect(text).toContain("действует 10 минут:");
-    const token = new URL(text.split("\n")[1]).searchParams.get("login");
+    const message = calls.filter((c) => c.method === "sendMessage")[1]?.payload;
+    expect(message?.parse_mode).toBe("HTML");
+    const link = /^<a href="([^"]+)">TaskBuddy<\/a>$/.exec(String(message?.text));
+    const url = new URL(link![1].replaceAll("&amp;", "&"));
+    expect(url.searchParams.has("pick")).toBe(false);
+    const token = url.searchParams.get("login");
 
     const first = await call("/api/auth/link", { method: "POST", body: JSON.stringify({ token }) });
     expect(first.status).toBe(200);
@@ -148,55 +151,10 @@ describe("вебхук Telegram", () => {
   });
 });
 
-describe("вход из мини-приложения по initData", () => {
-  const user = JSON.stringify({ id: 1001, first_name: "Ann" });
-
-  beforeEach(async () => {
-    await registerByInvite(db, ann, env.OWNER_INVITE_CODE, env.OWNER_INVITE_CODE, 0);
-  });
-
-  async function signIn(initData: string) {
-    return call("/api/auth/telegram", { method: "POST", body: JSON.stringify({ initData }) });
-  }
-
-  const now = () => String(Math.floor(Date.now() / 1000));
-
-  it("верная подпись дает сессию", async () => {
-    const response = await signIn(await signInitData({ auth_date: now(), user }));
-    expect(response.status).toBe(200);
-    const { token } = await response.json<{ token: string }>();
-    const me = await call("/api/me", { headers: { Authorization: `Bearer ${token}` } });
-    expect(me.status).toBe(200);
-  });
-
-  it("подпись чужим токеном бота отклоняется", async () => {
-    const response = await signIn(await signInitData({ auth_date: now(), user }, "999:other"));
-    expect(response.status).toBe(401);
-  });
-
-  it("подмененные данные отклоняются", async () => {
-    const signed = await signInitData({ auth_date: now(), user });
-    const forged = signed.replace("1001", "2002");
-    expect((await signIn(forged)).status).toBe(401);
-  });
-
-  it("устаревшие данные отклоняются", async () => {
-    const old = String(Math.floor(Date.now() / 1000) - defaults.initDataMaxAgeMinutes * 60 - 60);
-    expect((await signIn(await signInitData({ auth_date: old, user }))).status).toBe(401);
-  });
-
-  it("незнакомый пользователь Telegram не входит", async () => {
-    const stranger = JSON.stringify({ id: 3003, first_name: "Eve" });
-    expect((await signIn(await signInitData({ auth_date: now(), user: stranger }))).status).toBe(401);
-  });
-});
-
 describe("страница без сессии", () => {
   it("тело null или не JSON при входе отклоняется с 401", async () => {
-    for (const path of ["/api/auth/telegram", "/api/auth/link"]) {
-      expect((await call(path, { method: "POST", body: "null" })).status).toBe(401);
-      expect((await call(path, { method: "POST", body: "not json" })).status).toBe(401);
-    }
+    expect((await call("/api/auth/link", { method: "POST", body: "null" })).status).toBe(401);
+    expect((await call("/api/auth/link", { method: "POST", body: "not json" })).status).toBe(401);
   });
 
   it("/api/me без токена и с чужим токеном отвечает 401", async () => {

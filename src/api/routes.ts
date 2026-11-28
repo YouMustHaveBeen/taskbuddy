@@ -1,9 +1,7 @@
 import { Hono, type Context } from "hono";
-import { signInByLink, signInByTelegramId, type SignedIn } from "../core/auth";
-import { defaults } from "../core/settings";
+import { signInByLink, type SignedIn } from "../core/auth";
 import { createDb } from "../db/client";
 import type { User } from "../db/users";
-import { verifyInitData } from "../telegram/initData";
 import { dayRoutes } from "./day";
 import { insightRoutes } from "./insights";
 import { itemRoutes } from "./items";
@@ -11,20 +9,6 @@ import { referenceRoutes } from "./references";
 import { requireUser, type ApiEnv } from "./session";
 
 export const apiRoutes = new Hono<ApiEnv>();
-
-apiRoutes.post("/auth/telegram", async (c) => {
-  const initData = await bodyField(c, "initData");
-  if (typeof initData !== "string") return c.body(null, 401);
-  const now = Date.now();
-  const telegramId = await verifyInitData(
-    initData,
-    c.env.TELEGRAM_BOT_TOKEN,
-    now,
-    defaults.initDataMaxAgeMinutes * 60_000,
-  );
-  if (telegramId === undefined) return c.body(null, 401);
-  return signedIn(c, await signInByTelegramId(createDb(c.env.DB), telegramId, now));
-});
 
 apiRoutes.post("/auth/link", async (c) => {
   const token = await bodyField(c, "token");

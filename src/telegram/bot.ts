@@ -1,12 +1,11 @@
 import { Bot } from "grammy/web";
 import { pickLanguage, t, type Language } from "../../i18n";
-import { createLoginLink, registerByInvite } from "../core/auth";
+import { registerByInvite } from "../core/auth";
 import { items } from "../core/items";
-import { defaults } from "../core/settings";
 import type { Db } from "../db/client";
 import { findUserByTelegramId } from "../db/users";
 import type { Env } from "../env";
-import { onCallback, onReply } from "./day";
+import { onCallback, onReply, sendLoginLink } from "./day";
 
 let botInfo: Bot["botInfo"] | undefined;
 
@@ -41,11 +40,7 @@ export async function createBot(env: Env, db: Db, origin: string): Promise<Bot> 
       await ctx.reply(t(pickLanguage(ctx.from.language_code), "bot.start.private"));
       return;
     }
-    const token = await createLoginLink(db, user.id, Date.now());
-    const text = t(user.language as Language, "bot.web.link", {
-      count: defaults.loginLinkTtlMinutes,
-    });
-    await ctx.reply(`${text}\n${origin}/?login=${encodeURIComponent(token)}`);
+    await sendLoginLink({ api: ctx.api, db, user, url: origin }, false);
   });
 
   chat.on("callback_query:data", async (ctx) => {

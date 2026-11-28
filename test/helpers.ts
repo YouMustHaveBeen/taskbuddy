@@ -2,8 +2,7 @@ import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test"
 import { env } from "cloudflare:workers";
 import { vi } from "vitest";
 import app from "../src/index";
-import { signInByTelegramId } from "../src/core/auth";
-import { toHex } from "../src/core/crypto";
+import { createLoginLink, signInByLink } from "../src/core/auth";
 import { createDb } from "../src/db/client";
 
 export const ORIGIN = "https://taskbuddy.example";
@@ -85,21 +84,6 @@ export function sendUpdate(text: string, from = { id: 1001, first_name: "Ann", l
   });
 }
 
-async function hmac(key: BufferSource, data: string): Promise<ArrayBuffer> {
-  const cryptoKey = await crypto.subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  return crypto.subtle.sign("HMAC", cryptoKey, new TextEncoder().encode(data));
-}
-
-export async function signInitData(fields: Record<string, string>, token = env.TELEGRAM_BOT_TOKEN) {
-  const checkString = Object.keys(fields)
-    .sort()
-    .map((key) => `${key}=${fields[key]}`)
-    .join("\n");
-  const secret = await hmac(new TextEncoder().encode("WebAppData"), token);
-  const hash = toHex(await hmac(secret, checkString));
-  return new URLSearchParams({ ...fields, hash }).toString();
-}
-
 export async function createUser(telegramId: number, name: string): Promise<{ id: string; token: string }> {
   const now = Date.now();
   const householdId = crypto.randomUUID();
@@ -112,7 +96,8 @@ export async function createUser(telegramId: number, name: string): Promise<{ id
       )
       .bind(id, householdId, telegramId, name, now),
   ]);
-  const signedIn = await signInByTelegramId(createDb(env.DB), telegramId, now);
+  const db = createDb(env.DB);
+  const signedIn = await signInByLink(db, await createLoginLink(db, id, now), now);
   return { id, token: signedIn!.token };
 }
 
