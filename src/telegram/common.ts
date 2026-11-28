@@ -35,9 +35,14 @@ export async function clearPrompts(tg: Tg, cardMessageId: number) {
   }
 }
 
-/** Строка награды списка: у прошедших и открытой — название, следующие скрыты. */
-export const rewardLine = (user: User, reward: ListReward) =>
-  reward.title === null ? say(user, "reward.hidden") : say(user, "reward.line", { title: reward.title });
+/** Строка награды списка: у прошедших и открытой — название, следующие скрыты; прошедшее место без награды — без строки. */
+export function rewardLine(user: User, reward: ListReward): string | undefined {
+  if (reward.title !== null) return say(user, "reward.line", { title: reward.title });
+  return reward.past ? undefined : say(user, "reward.hidden");
+}
+
+/** Предел длины сообщения Telegram. */
+export const messageLimit = 4096;
 
 /**
  * Список на сегодня: награда, задача, награда … и в конце награда; старое сообщение удаляется, новое присылается
@@ -47,12 +52,12 @@ export async function sendList(tg: Tg, view: TodayView): Promise<void> {
   const lines = [say(tg.user, "bot.list.title"), ""];
   if (view.list.length === 0) lines.push(say(tg.user, "bot.list.empty"));
   view.list.forEach((task, index) => {
-    const reward = view.rewards[index];
-    if (reward) lines.push(rewardLine(tg.user, reward));
+    const reward = view.rewards[index] && rewardLine(tg.user, view.rewards[index]);
+    if (reward) lines.push(reward);
     lines.push(`${task.state === "done" ? "✓" : "•"} ${task.title}`);
   });
-  const last = view.rewards[view.list.length];
-  if (last) lines.push(rewardLine(tg.user, last));
+  const last = view.rewards[view.list.length] && rewardLine(tg.user, view.rewards[view.list.length]);
+  if (last) lines.push(last);
   const keyboard = new InlineKeyboard();
   const open = view.rewards.find((reward) => reward.open);
   if (open?.title) keyboard.text(say(tg.user, "reward.startNamed", { title: open.title }), data("tr", view.date, open.position)).row();
@@ -66,7 +71,9 @@ export async function sendList(tg: Tg, view: TodayView): Promise<void> {
   if (tg.user.listMessageId !== null) {
     await tg.api.deleteMessage(tg.user.telegramId, tg.user.listMessageId).catch(() => undefined);
   }
-  const sent = await tg.api.sendMessage(tg.user.telegramId, lines.join("\n"), {
+  // длинный список обрезается до предела сообщения Telegram
+  const text = lines.join("\n");
+  const sent = await tg.api.sendMessage(tg.user.telegramId, text.length > messageLimit ? `${text.slice(0, messageLimit - 1)}…` : text, {
     reply_markup: keyboard.inline_keyboard.length > 0 ? keyboard : undefined,
   });
   await setListMessage(tg.db, tg.user.id, sent.message_id);

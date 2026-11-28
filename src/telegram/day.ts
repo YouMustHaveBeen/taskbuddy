@@ -5,7 +5,7 @@ import { buttonSlots, day, localDate, type ButtonSlot, type DayResult, type Plan
 import { schedule } from "../core/schedule";
 import { savePrompt, takePrompt, type BotPrompt } from "../db/botPrompts";
 import type { User } from "../db/users";
-import { ask, clearPrompts, data, markAnswered, markStale, rewardLine, say, sendList, type Tg } from "./common";
+import { ask, clearPrompts, data, markAnswered, markStale, messageLimit, say, sendList, type Tg } from "./common";
 import { answerTimerPrompt, onTimerCallback, sendTimerChoice } from "./timer";
 
 type Step = "why" | "blocks";
@@ -123,8 +123,6 @@ export async function sendReminder(tg: Tg, itemId: string, title: string, remind
   await tg.api.sendMessage(tg.user.telegramId, say(tg.user, "bot.reminder", { title }), { reply_markup: keyboard });
 }
 
-/** Предел длины сообщения Telegram. */
-const messageLimit = 4096;
 
 /** «Завтра дедлайн: название» по строке на задачу; длинный список делится на несколько сообщений. */
 export async function sendDeadlines(tg: Tg, titles: string[]): Promise<void> {
@@ -217,7 +215,13 @@ async function sendFirstStep(tg: Tg, cardMessageId: number, task: PlanTask) {
   }
   const caption = say(tg.user, "bot.firstStep.caption", { title: task.title });
   const sent = await tg.api.sendVoice(tg.user.telegramId, voice, { caption });
-  await savePrompt(tg.db, { ...prompt, userId: tg.user.id, messageId: sent.message_id, cardMessageId }, Date.now());
+  try {
+    await savePrompt(tg.db, { ...prompt, userId: tg.user.id, messageId: sent.message_id, cardMessageId }, Date.now());
+  } catch (error) {
+    // вопрос не записан: голосовое удаляется из чата
+    await tg.api.deleteMessage(tg.user.telegramId, sent.message_id).catch(() => undefined);
+    throw error;
+  }
 }
 
 /** Голосовое ответом на вопрос о первом шаге или на голосовой первый шаг: записывается в задачу. false — это не такой ответ. */
@@ -229,7 +233,13 @@ export async function onVoice(tg: Tg, replyTo: number, fileId: string): Promise<
     await savePrompt(tg.db, prompt, Date.now());
     return false;
   }
-  return day.saveVoice(tg.db, tg.user.id, prompt.action, fileId);
+  try {
+    return await day.saveVoice(tg.db, tg.user.id, prompt.action, fileId);
+  } catch (error) {
+    // голосовое не записано: вопрос возвращается, на него можно ответить еще раз
+    await savePrompt(tg.db, prompt, Date.now()).catch(() => undefined);
+    throw error;
+  }
 }
 
 /** Сообщение «TaskBuddy» со ссылкой входа на страницу; `pick` — страница открывается в режиме выбора. */
@@ -293,7 +303,7 @@ export async function onCallback(tg: Tg, messageId: number, messageText: string,
       return;
     }
     const keyboard = new InlineKeyboard().text(say(tg.user, "reward.start"), data("tr", view.date, open.position));
-    await tg.api.sendMessage(tg.user.telegramId, rewardLine(tg.user, open), { reply_markup: keyboard });
+    await tg.api.sendMessage(tg.user.telegramId, say(tg.user, "reward.line", { title: open.title }), { reply_markup: keyboard });
     return;
   }
 
@@ -341,7 +351,11 @@ export async function onCallback(tg: Tg, messageId: number, messageText: string,
     }
     await editCard(tg, messageId, result.today, task);
     // не менять порядок: список на сегодня должен остаться последним сообщением
-    if (action === "accept") await sendFirstStep(tg, messageId, task);
+    if (action === "accept") {
+      await sendFirstStep(tg, messageId, task).catch((error: unknown) =>
+        console.error("first step send failed", error instanceof Error ? error.name : "unknown"),
+      );
+    }
     if (action === "accept" || action === "done") await sendList(tg, result.today);
     return;
   }

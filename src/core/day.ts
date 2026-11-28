@@ -191,9 +191,17 @@ export type PlanTask = Omit<
 };
 /**
  * Награда списка на сегодня на месте `position` (0 — перед первой задачей, N — после последней). Открыта награда
- * сразу после сделанных задач; у прошедших и открытой есть название, у следующих нет (скрыты).
+ * сразу после сделанных задач; у прошедших (`past`) и открытой есть название, у следующих нет (скрыты).
+ * Прошедшее место без награды (наград тогда не было или награду удалили) не показывается.
  */
-export type ListReward = { position: number; open: boolean; rewardId: string | null; title: string | null; minutes: number | null };
+export type ListReward = {
+  position: number;
+  open: boolean;
+  past: boolean;
+  rewardId: string | null;
+  title: string | null;
+  minutes: number | null;
+};
 export type TodayView = {
   date: string;
   deadlines: PlanTask[];
@@ -235,6 +243,7 @@ function listRewards(list: PlanTask[], rewards: DayReward[]): ListReward[] {
     lines.push({
       position,
       open: position === open,
+      past: position < open,
       rewardId: reward?.id ?? null,
       title: reward?.title ?? null,
       minutes: reward?.minutes ?? null,

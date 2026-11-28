@@ -103,11 +103,12 @@ async function startReward(tg: Tg, messageId: number, messageText: string, date:
   }
   const result = await timer.reward(tg.db, tg.user, Date.now(), position, "bot");
   if (result.outcome === "ok" && result.timer) {
+    // не менять порядок: будильник ставится до отправки, иначе при ошибке Telegram «Время вышло» не придет
+    await arm(tg, result.timer);
     const sent = await tg.api.sendMessage(tg.user.telegramId, timerText(tg, result.timer, "live"), {
       reply_markup: timerKeyboard(tg, result.timer),
     });
     await timer.setMessage(tg.db, tg.user.id, result.timer.itemId, sent.message_id);
-    await arm(tg, result.timer);
   } else if (result.outcome === "busy" && result.timer) {
     await sendBusy(tg, result.timer);
   } else if (result.today) {

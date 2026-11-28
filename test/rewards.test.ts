@@ -12,7 +12,7 @@ let updateId = 9000;
 let calls: TelegramCall[];
 let ann: { id: string; token: string };
 
-type Reward = { position: number; open: boolean; title: string | null; minutes: number | null };
+type Reward = { position: number; open: boolean; past: boolean; title: string | null; minutes: number | null };
 type Row = { slot: string; position: number; itemId: string; state: string; title: string; hidden: boolean; firstStep: string | null; hasVoice: boolean };
 type Today = { buttons: Record<string, Row | undefined>; list: Row[]; rewards: Reward[] };
 type Timer = { kind: string; itemId: string; title: string; minutes: number; state: string; endsAt: number | null };
@@ -153,6 +153,20 @@ describe("награды в списке на сегодня", () => {
     expect(done.body.rewards[0].title).toBe(first.rewards[0].title);
   });
 
+  it("прошедшее место, открытое без наград, остается без награды и помечено прошедшим", async () => {
+    await insertTask("позвонить маме", { important: 1 });
+    await today();
+    await post("/today/important/0/reveal");
+    await post("/today/important/0/accept");
+    await post("/today/important/0/done");
+    await insertReward("планка", 3);
+    const view = await today();
+    expect(view.rewards.map((r) => [r.past, r.open, r.title])).toEqual([
+      [true, false, null],
+      [false, true, "планка"],
+    ]);
+  });
+
   it("«Старт» у открытой награды: таймер на ее длину; после конца только «Завершить»", async () => {
     const id = await insertReward("почитать книгу", 5);
     await insertTask("позвонить маме", { important: 1 });
@@ -224,6 +238,23 @@ describe("награды и первый шаг в боте", () => {
     const reward = sent("sendMessage").at(-1)!;
     expect(reward.payload.text).toBe("🏆 планка");
     expect(buttons(reward)).toEqual([{ text: "Старт", callback_data: `tr|${D}|1` }]);
+  });
+
+  it("прошедшее место без награды в списке бота не выводится; длинный список обрезается до предела сообщения", async () => {
+    await insertTask("позвонить маме", { important: 1 });
+    await press(`b|${D}|important`);
+    await press(`d|${D}|important|0|accept`);
+    await press(`d|${D}|important|0|done`);
+    await insertReward("планка", 3);
+    await press(`l|${D}|important|0`);
+    expect(sent("sendMessage").at(-1)!.payload.text).toBe("Список на сегодня\n\n✓ позвонить маме\n🏆 планка");
+
+    // план дня уже составлен: длинная задача берется на сегодня кнопкой напоминания
+    const long = await insertTask("х".repeat(4090));
+    await press(`r|t|${long}`);
+    const text = String(sent("sendMessage").at(-1)!.payload.text);
+    expect(text.length).toBe(4096);
+    expect(text.endsWith("…")).toBe(true);
   });
 
   it("без наград в «Справочниках» нет ни наград в списке, ни кнопки «Награда»", async () => {

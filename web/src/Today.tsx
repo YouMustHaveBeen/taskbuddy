@@ -25,7 +25,7 @@ type PlanRow = {
   askBlocks: boolean;
 };
 /** Награда списка на сегодня: у прошедших и открытой есть название, следующие скрыты. */
-type ListReward = { position: number; open: boolean; title: string | null; minutes: number | null };
+type ListReward = { position: number; open: boolean; past: boolean; title: string | null; minutes: number | null };
 type TodayView = {
   deadlines: PlanRow[];
   buttons: Partial<Record<Slot, PlanRow>>;
@@ -388,6 +388,8 @@ function workRows(view: TodayView): PlanRow[] {
 /** Строка награды в списке на сегодня; у открытой — «Старт». */
 function RewardRow(props: { reward: ListReward; text: Text; start: (position: number) => Promise<void> }) {
   const { reward, text, start } = props;
+  // прошедшее место без награды не показывается
+  if (reward.past && reward.title === null) return null;
   return (
     <li className="row reward-row">
       <span>{reward.title === null ? text("reward.hidden") : text("reward.line", { title: reward.title })}</span>
