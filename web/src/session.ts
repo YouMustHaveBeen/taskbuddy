@@ -1,16 +1,6 @@
-import { retrieveRawInitData } from "@telegram-apps/sdk";
-
 export type PageUser = { name: string; language: string };
 
 export const STORAGE_KEY = "taskbuddy.session";
-
-function telegramInitData(): string | undefined {
-  try {
-    return retrieveRawInitData();
-  } catch {
-    return undefined;
-  }
-}
 
 async function post(path: string, body: unknown): Promise<PageUser | undefined> {
   const response = await fetch(path, {
@@ -33,9 +23,6 @@ export function forgetSession(): void {
 }
 
 export async function signIn(): Promise<PageUser | undefined> {
-  const initData = telegramInitData();
-  if (initData) return post("/api/auth/telegram", { initData });
-
   const url = new URL(location.href);
   const linkToken = url.searchParams.get("login");
   if (linkToken) {

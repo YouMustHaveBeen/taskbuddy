@@ -16,14 +16,6 @@ describe("i18n", () => {
     }
   });
 
-  it("склоняет по Intl.PluralRules", () => {
-    expect(t("ru", "bot.web.link", { count: 1 })).toContain("1 минуту");
-    expect(t("ru", "bot.web.link", { count: 3 })).toContain("3 минуты");
-    expect(t("ru", "bot.web.link", { count: 10 })).toContain("10 минут:");
-    expect(t("en", "bot.web.link", { count: 1 })).toContain("1 minute:");
-    expect(t("en", "bot.web.link", { count: 10 })).toContain("10 minutes:");
-  });
-
   it("подставляет параметры", () => {
     expect(t("en", "web.signedIn", { name: "Ann" })).toBe("Signed in: Ann");
   });

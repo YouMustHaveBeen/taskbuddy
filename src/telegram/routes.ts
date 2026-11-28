@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import type { Update } from "grammy/types";
-import { t } from "../../i18n";
 import { safeEqual } from "../core/crypto";
 import { defaults } from "../core/settings";
 import { createDb } from "../db/client";
@@ -29,7 +28,7 @@ telegramRoutes.post("/setup", async (c) => {
     allowed_updates: ["message", "callback_query"],
   });
   await bot.api.setChatMenuButton({
-    menu_button: { type: "web_app", text: t("en", "bot.menuButton"), web_app: { url: `${origin}/` } },
+    menu_button: { type: "default" },
   });
   return c.text("ok");
 });

@@ -1,12 +1,13 @@
 import { InlineKeyboard, type Api } from "grammy/web";
 import { t, type Language, type TextKey } from "../../i18n";
+import { createLoginLink } from "../core/auth";
 import { buttonSlots, day, localDate, type ButtonSlot, type DayResult, type PlanTask, type TodayView } from "../core/day";
 import { schedule } from "../core/schedule";
 import { dropPrompts, savePrompt, setListMessage, takePrompt, type BotPrompt } from "../db/botPrompts";
 import type { Db } from "../db/client";
 import type { User } from "../db/users";
 
-/** Бот для одного пользователя: API Telegram, база, пользователь и адрес страницы (для кнопки «Выбрать»). */
+/** Бот для одного пользователя: API Telegram, база, пользователь и адрес страницы (для ссылки входа). */
 export type Tg = { api: Api; db: Db; user: User; url: string };
 
 type Step = "why" | "blocks";
@@ -138,7 +139,7 @@ export async function sendMorning(tg: Tg, view: TodayView): Promise<void> {
     .text(say(tg.user, "slot.impactful"), press("impactful"))
     .text(say(tg.user, "slot.easy"), press("easy"))
     .row()
-    .webApp(say(tg.user, "slot.pick"), `${tg.url}/?pick=1`);
+    .text(say(tg.user, "slot.pick"), data("w"));
   await tg.api.sendMessage(tg.user.telegramId, say(tg.user, "bot.five.title"), { reply_markup: keyboard });
   await sendList(tg, view);
 }
@@ -258,10 +259,23 @@ async function afterWhy(tg: Tg, messageId: number, view: TodayView, task: PlanTa
   }
 }
 
+/** Сообщение «TaskBuddy» со ссылкой входа на страницу; `pick` — страница открывается в режиме выбора. */
+export async function sendLoginLink(tg: Tg, pick: boolean): Promise<void> {
+  const token = await createLoginLink(tg.db, tg.user.id, Date.now());
+  const url = `${tg.url}/?login=${encodeURIComponent(token)}${pick ? "&pick=1" : ""}`;
+  const text = `<a href="${url.replaceAll("&", "&amp;")}">${say(tg.user, "bot.web.link")}</a>`;
+  await tg.api.sendMessage(tg.user.telegramId, text, { parse_mode: "HTML" });
+}
+
 /** Нажатие кнопки на сообщениях плана дня, опроса и напоминаний. */
 export async function onCallback(tg: Tg, messageId: number, messageText: string, raw: string): Promise<void> {
   const parts = raw.split("|");
   const now = Date.now();
+  if (parts[0] === "w" && parts.length === 1) {
+    await sendLoginLink(tg, true);
+    return;
+  }
+
   if (parts[0] === "b" && parts.length === 3) {
     const slot = parts[2];
     let view = await day.today(tg.db, tg.user, now);

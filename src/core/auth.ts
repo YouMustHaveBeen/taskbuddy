@@ -6,7 +6,7 @@ import {
   insertSession,
   insertSessionAndGetUser,
 } from "../db/sessions";
-import { createFirstUser, findUserByTelegramId, type User } from "../db/users";
+import { createFirstUser, type User } from "../db/users";
 import { randomToken, safeEqual, sha256Hex } from "./crypto";
 import { defaults } from "./settings";
 
@@ -64,18 +64,6 @@ export async function signInByLink(
   const token = randomToken();
   const user = await insertSessionAndGetUser(db, newSession(await sha256Hex(token), userId, now));
   return user && { token, user };
-}
-
-export async function signInByTelegramId(
-  db: Db,
-  telegramId: number,
-  now: number,
-): Promise<SignedIn | undefined> {
-  const user = await findUserByTelegramId(db, telegramId);
-  if (!user) return undefined;
-  const token = randomToken();
-  await insertSession(db, newSession(await sha256Hex(token), user.id, now));
-  return { token, user };
 }
 
 export async function userBySession(db: Db, token: string, now: number): Promise<User | undefined> {

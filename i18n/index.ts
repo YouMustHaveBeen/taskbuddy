@@ -14,7 +14,7 @@ export function t(
   key: TextKey,
   params: Record<string, string | number> = {},
 ): string {
-  const entry: string | Record<string, string> = languages[language][key];
+  const entry = languages[language][key] as string | Record<string, string>;
   const template =
     typeof entry === "string"
       ? entry

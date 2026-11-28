@@ -79,6 +79,17 @@ const buttons = (c: TelegramCall) =>
   ((c.payload.reply_markup as { inline_keyboard?: { text: string; callback_data?: string }[][] })?.inline_keyboard ?? []).flat();
 
 describe("бот: пять кнопок и карточка задачи", () => {
+  it("«Выбрать» присылает ссылку «TaskBuddy», которая входит на страницу в режиме выбора", async () => {
+    await press("w");
+    const message = sent("sendMessage").at(-1)!;
+    expect(message.payload.parse_mode).toBe("HTML");
+    const link = /^<a href="([^"]+)">TaskBuddy<\/a>$/.exec(String(message.payload.text));
+    const url = new URL(link![1].replaceAll("&amp;", "&"));
+    expect(url.searchParams.get("pick")).toBe("1");
+    const signIn = await call("/api/auth/link", { method: "POST", body: JSON.stringify({ token: url.searchParams.get("login") }) });
+    expect(signIn.status).toBe(200);
+  });
+
   it("кнопка дает задачу с «Принять» / «Отказаться»; «Принять» меняет карточку и присылает список последним", async () => {
     await insertTask("позвонить маме", { important: 1, why: "давно не звонила" });
     await press(`b|${D}|important`);
