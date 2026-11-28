@@ -116,6 +116,7 @@ describe("запуск расписания", () => {
     const tick = (await schedule.tick(db(), at(NEXT, "21:05"))).users[0];
     expect(tick.morning?.reprompt).toBe(true);
     expect(tick.survey).toBeUndefined();
+    expect((await schedule.tick(db(), at(NEXT, "21:10"))).users).toEqual([]);
   });
 
   it("неудачная отправка возвращает отметку события и напоминание: следующий запуск отправляет снова", async () => {

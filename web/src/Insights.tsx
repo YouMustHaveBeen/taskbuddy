@@ -24,7 +24,7 @@ export function Insights({ language, onSignedOut }: Props) {
       setRows(list.data.insights);
       setSpheres(references.data.spheres);
     }
-    // без сфер вкладка не показывается: иначе нельзя было бы понять, почему нет галочек
+    // вкладка показывается, только когда загружены и инсайты, и сферы
     setFailed(!list.data || !references.data);
   }, [onSignedOut]);
 
@@ -72,18 +72,26 @@ function InsightRow(props: {
   const { row, spheres, text, save, remove } = props;
   const [draft, setDraft] = useState(row.text);
   const [confirming, setConfirming] = useState(false);
-  // последний набранный текст и сферы: быстрые изменения подряд не теряются
+  // последний набранный текст, последний сохраненный текст и последний выбор сфер
   const latestText = useRef(row.text);
   const savedText = useRef(row.text);
   const latestSpheres = useRef(row.sphereIds);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // сохранения одной записи уходят по очереди: следующее начинается после ответа на предыдущее
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const enqueue = (patch: { text?: string; sphereIds?: string[] }) => {
+    const next = queue.current.then(() => save(row.id, patch));
+    queue.current = next;
+    return next;
+  };
 
   const saveText = () => {
     clearTimeout(timer.current);
     const value = latestText.current.trim();
     if (value === "" || value === savedText.current) return;
-    savedText.current = value;
-    void save(row.id, { text: value });
+    void enqueue({ text: value }).then((ok) => {
+      if (ok) savedText.current = value;
+    });
   };
 
   // текст сохраняется после паузы в наборе, при выходе из поля и при закрытии вкладки
@@ -94,7 +102,7 @@ function InsightRow(props: {
     if (next.length > defaults.itemMaxSpheres) return;
     const previous = latestSpheres.current;
     latestSpheres.current = next;
-    void save(row.id, { sphereIds: next }).then((ok) => {
+    void enqueue({ sphereIds: next }).then((ok) => {
       if (!ok && latestSpheres.current === next) latestSpheres.current = previous;
     });
   };

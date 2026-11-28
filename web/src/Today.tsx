@@ -62,7 +62,7 @@ export function Today({ language, onSignedOut, ring }: Props) {
   const [notice, setNotice] = useState<TextKey>();
   // из бота кнопка «Выбрать» открывает страницу сразу в режиме выбора
   const [choosing, setChoosing] = useState(() => ring && new URLSearchParams(location.search).has("pick"));
-  // ?pick=1 действует один раз: после открытия он убирается из адреса, иначе выбор открывался бы снова
+  // после открытия ?pick=1 убирается из адреса
   useEffect(() => {
     const url = new URL(location.href);
     if (!url.searchParams.has("pick")) return;
@@ -113,6 +113,10 @@ export function Today({ language, onSignedOut, ring }: Props) {
       setView(result.data);
       setChoosing(false);
       setNotice(undefined);
+    } else if (result.status === 400) {
+      // задачу не добавили (например, вчерашний опрос не пройден): день перечитывается, на странице актуальное состояние
+      setChoosing(false);
+      await load();
     } else setFailed(true);
   };
 

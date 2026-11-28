@@ -79,10 +79,11 @@ async function editCard(tg: Tg, messageId: number, view: TodayView, task: PlanTa
 }
 
 /** Карточка показывает актуальное состояние слота, если нажатая кнопка уже устарела. */
-async function showStale(tg: Tg, messageId: number, slot: string, position: number) {
+async function showStale(tg: Tg, messageId: number, slot: string, position: number, messageText?: string) {
   const view = await day.today(tg.db, tg.user, Date.now());
   const task = findTask(view, slot, position);
   if (task) await editCard(tg, messageId, view, task, undefined, undefined, true);
+  else if (messageText) await markStale(tg, messageId, messageText);
   else await tg.api.editMessageReplyMarkup(tg.user.telegramId, messageId, { reply_markup: { inline_keyboard: [] } }).catch(() => undefined);
 }
 
@@ -91,7 +92,13 @@ async function ask(tg: Tg, cardMessageId: number, prompt: Omit<BotPrompt, "userI
   const sent = await tg.api.sendMessage(tg.user.telegramId, `${say(tg.user, question)}\n${say(tg.user, "bot.replyHint")}`, {
     reply_markup: { force_reply: true },
   });
-  await savePrompt(tg.db, { ...prompt, userId: tg.user.id, messageId: sent.message_id, cardMessageId }, Date.now());
+  try {
+    await savePrompt(tg.db, { ...prompt, userId: tg.user.id, messageId: sent.message_id, cardMessageId }, Date.now());
+  } catch (error) {
+    // вопрос не записан: он удаляется из чата, чтобы ответ на него не ушел в инбокс
+    await tg.api.deleteMessage(tg.user.telegramId, sent.message_id).catch(() => undefined);
+    throw error;
+  }
 }
 
 /** Убирает вопросы к карточке: по ним уже ответили кнопкой или пропустили. */
@@ -281,7 +288,7 @@ export async function onCallback(tg: Tg, messageId: number, messageText: string,
     const [, date, slot, rawPosition, action] = parts;
     const position = Number(rawPosition);
     if (date !== localDate(now, tg.user.timezone)) {
-      await showStale(tg, messageId, slot, position);
+      await showStale(tg, messageId, slot, position, messageText);
       return;
     }
     if (action === "wr") {
@@ -296,7 +303,7 @@ export async function onCallback(tg: Tg, messageId: number, messageText: string,
     if (action === "sw") {
       const view = await day.today(tg.db, tg.user, now);
       const task = findTask(view, slot, position);
-      if (!task || task.state !== "refused" || task.position !== position) await showStale(tg, messageId, slot, position);
+      if (!task || task.state !== "refused" || task.position !== position) await showStale(tg, messageId, slot, position, messageText);
       else await afterWhy(tg, messageId, view, task);
       return;
     }
@@ -308,7 +315,7 @@ export async function onCallback(tg: Tg, messageId: number, messageText: string,
       return;
     }
     if (result.outcome !== "ok" || !result.today) {
-      await showStale(tg, messageId, slot, position);
+      await showStale(tg, messageId, slot, position, messageText);
       return;
     }
     const task = findTask(result.today, slot, position);
