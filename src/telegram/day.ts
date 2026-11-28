@@ -95,7 +95,7 @@ async function ask(tg: Tg, cardMessageId: number, prompt: Omit<BotPrompt, "userI
   try {
     await savePrompt(tg.db, { ...prompt, userId: tg.user.id, messageId: sent.message_id, cardMessageId }, Date.now());
   } catch (error) {
-    // вопрос не записан: он удаляется из чата, чтобы ответ на него не ушел в инбокс
+    // вопрос не записан: он удаляется из чата
     await tg.api.deleteMessage(tg.user.telegramId, sent.message_id).catch(() => undefined);
     throw error;
   }
