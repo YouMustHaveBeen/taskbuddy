@@ -17,6 +17,17 @@ dayRoutes.post("/today/pick", requireUser, async (c) => {
   return reply(c, await day.pick(c.var.db, c.var.user, Date.now(), body?.itemId));
 });
 
+dayRoutes.post("/today/survey/:date/:slot/:position/:answer", requireUser, async (c) => {
+  const body: unknown = await c.req.json().catch(() => undefined);
+  const target = {
+    date: c.req.param("date"),
+    slot: c.req.param("slot"),
+    position: Number(c.req.param("position")),
+    answer: c.req.param("answer"),
+  };
+  return reply(c, await day.survey(c.var.db, c.var.user, Date.now(), target, body));
+});
+
 dayRoutes.post("/today/:slot/:position/:action", requireUser, async (c) => {
   const body: unknown = await c.req.json().catch(() => undefined);
   const target = { slot: c.req.param("slot"), position: Number(c.req.param("position")), action: c.req.param("action") };

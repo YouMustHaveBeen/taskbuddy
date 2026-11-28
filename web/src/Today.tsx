@@ -6,11 +6,12 @@ import { Tasks } from "./Tasks";
 type Slot = "important" | "urgent" | "impactful" | "easy";
 type Pause = "deferred" | "queued" | "waiting";
 type PlanRow = {
+  date: string;
   slot: string;
   position: number;
   itemId: string;
   title: string;
-  state: "offered" | "accepted" | "refused" | "done" | "returned" | "closed";
+  state: "offered" | "accepted" | "refused" | "done" | "returned" | "closed" | "tomorrow" | "dropped";
   hidden: boolean;
   flavor: "dopamine" | "frog" | null;
   deadline: number | null;
@@ -24,9 +25,12 @@ type TodayView = {
   deadlines: PlanRow[];
   buttons: Partial<Record<Slot, PlanRow>>;
   picked: PlanRow[];
+  survey: PlanRow[];
+  locked: boolean;
   done: number;
   ringTasks: number;
 };
+type Answer = "tomorrow" | "back" | "drop";
 type Step = "why" | "write" | "blocks";
 
 const slots: Slot[] = ["important", "urgent", "impactful", "easy"];
@@ -56,7 +60,8 @@ export function Today({ language, onSignedOut, ring }: Props) {
   const [view, setView] = useState<TodayView>();
   const [failed, setFailed] = useState(false);
   const [notice, setNotice] = useState<TextKey>();
-  const [choosing, setChoosing] = useState(false);
+  // из бота кнопка «Выбрать» открывает страницу сразу в режиме выбора
+  const [choosing, setChoosing] = useState(() => ring && new URLSearchParams(location.search).has("pick"));
 
   const load = useCallback(async () => {
     const result = await api<TodayView>("GET", "/today");
@@ -83,6 +88,15 @@ export function Today({ language, onSignedOut, ring }: Props) {
     return result.ok;
   };
 
+  /** Ответ вечернего опроса; в ответе приходит свежий план. */
+  const answer = async (row: PlanRow, choice: Answer, body?: unknown): Promise<boolean> => {
+    const result = await api<TodayView>("POST", `/today/survey/${row.date}/${row.slot}/${row.position}/${choice}`, body ?? {});
+    if (result.status === 401) onSignedOut();
+    if (result.data) setView(result.data);
+    else setFailed(true);
+    return result.ok;
+  };
+
   const pick = async (itemId: string) => {
     const result = await api<TodayView>("POST", "/today/pick", { itemId });
     if (result.status === 401) onSignedOut();
@@ -94,12 +108,26 @@ export function Today({ language, onSignedOut, ring }: Props) {
   };
 
   if (!view) return failed ? <p role="alert">{text("error.load")}</p> : null;
-  const empty = view.deadlines.length === 0 && view.picked.length === 0 && Object.keys(view.buttons).length === 0;
+  const empty =
+    view.survey.length === 0 && view.deadlines.length === 0 && view.picked.length === 0 && Object.keys(view.buttons).length === 0;
 
   return (
     <section>
       {failed && <p role="alert">{text("error.generic")}</p>}
-      {ring && <Ring done={view.done} total={view.ringTasks} label={text("today.progress", { done: view.done, total: view.ringTasks })} />}
+      {view.survey.length > 0 && (
+        <div className="block">
+          <h2>{text("survey.question")}</h2>
+          {view.locked && <p className="hint">{text("survey.first")}</p>}
+          <ul className="rows">
+            {view.survey.map((row) => (
+              <SurveyRow key={`${row.date}-${row.slot}-${row.position}`} row={row} text={text} answer={answer} />
+            ))}
+          </ul>
+        </div>
+      )}
+      {!view.locked && ring && (
+        <Ring done={view.done} total={view.ringTasks} label={text("today.progress", { done: view.done, total: view.ringTasks })} />
+      )}
       {empty && <p className="empty">{text("list.empty")}</p>}
       {view.deadlines.length > 0 && (
         <div className="block">
@@ -122,7 +150,7 @@ export function Today({ language, onSignedOut, ring }: Props) {
           </ul>
         </div>
       )}
-      <div className="block">
+      {!view.locked && <div className="block">
         <h2>{text("today.fiveTasks")}</h2>
         <div className="slots">
           {slots.map((slot) => (
@@ -139,7 +167,7 @@ export function Today({ language, onSignedOut, ring }: Props) {
               <li key={`${row.slot}-${row.position}`} className="row today-row">
                 <span className={row.state === "done" ? "done" : undefined}>{row.title}</span>
                 {row.state !== "done" && (
-                  <button type="button" onClick={() => void run("picked", row.position, "done")}>
+                  <button type="button" onClick={() => void run(row.slot, row.position, "done")}>
                     {text("action.done")}
                   </button>
                 )}
@@ -148,8 +176,50 @@ export function Today({ language, onSignedOut, ring }: Props) {
           </ul>
         )}
         {choosing && <Tasks language={language} onSignedOut={onSignedOut} onPick={pick} />}
-      </div>
+      </div>}
     </section>
+  );
+}
+
+const answerLabels: Record<Answer, TextKey> = { tomorrow: "survey.tomorrow", back: "survey.back", drop: "action.delete" };
+
+/** Строка вечернего опроса: «На завтра», «В хранилище» (сначала «Что мешает?», если спрашивается) или «Удалить». */
+function SurveyRow(props: { row: PlanRow; text: Text; answer: (row: PlanRow, choice: Answer, body?: unknown) => Promise<boolean> }) {
+  const { row, text, answer } = props;
+  const [asking, setAsking] = useState<Answer>();
+  const [draft, setDraft] = useState("");
+  const choose = (choice: Answer) => {
+    if (choice !== "drop" && row.askBlocks) setAsking(choice);
+    else void answer(row, choice);
+  };
+  return (
+    <li className="row survey-row">
+      <span>{row.title}</span>
+      {asking ? (
+        <>
+          <label className="field">
+            <span>{text("today.blocks")}</span>
+            <textarea value={draft} onChange={(event) => setDraft(event.target.value)} />
+          </label>
+          <div className="actions">
+            <button type="button" disabled={draft.trim() === ""} onClick={() => void answer(row, asking, { blocks: draft })}>
+              {text("action.save")}
+            </button>
+            <button type="button" onClick={() => void answer(row, asking)}>
+              {text("action.skip")}
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="actions">
+          {(["tomorrow", "back", "drop"] as const).map((choice) => (
+            <button key={choice} type="button" onClick={() => choose(choice)}>
+              {text(answerLabels[choice])}
+            </button>
+          ))}
+        </div>
+      )}
+    </li>
   );
 }
 

@@ -23,6 +23,12 @@ export const users = sqliteTable("users", {
   language: text("language").notNull(),
   timezone: text("timezone").notNull(),
   createdAt: integer("created_at").notNull(),
+  surveyOn: text("survey_on"),
+  morningOn: text("morning_on"),
+  repromptOn: text("reprompt_on"),
+  deadlineOn: text("deadline_on"),
+  nightOn: text("night_on"),
+  listMessageId: integer("list_message_id"),
 });
 
 export const settings = sqliteTable(
@@ -197,6 +203,7 @@ export const tasks = sqliteTable(
     firstStepVoiceId: text("first_step_voice_id"),
     firstStepText: text("first_step_text"),
     refusalNote: text("refusal_note"),
+    lastFailOn: text("last_fail_on"),
     inFocus: integer("in_focus", { mode: "boolean" }).notNull().default(false),
   },
   (t) => [
@@ -273,7 +280,7 @@ export const dayPlan = sqliteTable(
     itemId: text("item_id")
       .notNull()
       .references(() => items.id, { onDelete: "cascade" }),
-    state: text("state", { enum: ["offered", "accepted", "refused", "done", "returned", "closed"] })
+    state: text("state", { enum: ["offered", "accepted", "refused", "done", "returned", "closed", "tomorrow", "dropped"] })
       .notNull()
       .default("offered"),
     replacements: integer("replacements").notNull().default(0),
@@ -281,4 +288,20 @@ export const dayPlan = sqliteTable(
     createdAt: integer("created_at").notNull(),
   },
   (t) => [primaryKey({ columns: [t.userId, t.date, t.slot, t.position] }), index("day_plan_item").on(t.itemId)],
+);
+
+export const botPrompts = sqliteTable(
+  "bot_prompts",
+  {
+    userId: userRef(),
+    messageId: integer("message_id").notNull(),
+    cardMessageId: integer("card_message_id").notNull(),
+    kind: text("kind", { enum: ["reason", "blocks", "survey"] }).notNull(),
+    date: text("date").notNull(),
+    slot: text("slot").notNull(),
+    position: integer("position").notNull(),
+    action: text("action"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.messageId] })],
 );
