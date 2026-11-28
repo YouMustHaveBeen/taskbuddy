@@ -116,5 +116,29 @@
   "bot.stale": "This has changed, here is the current state",
   "bot.list.done": "Done: {title}",
   "action.takeToday": "Take today",
-  "action.remindTomorrow": "Remind again tomorrow"
+  "action.remindTomorrow": "Remind again tomorrow",
+  "action.timer": "Timer",
+  "timer.minutes": {
+    "one": "{count} min",
+    "other": "{count} min"
+  },
+  "timer.pause": "Pause",
+  "timer.resume": "Resume",
+  "timer.stop": "Stop",
+  "timer.park": "Park",
+  "timer.finish": "Finish",
+  "timer.again": "Continue",
+  "timer.later": "Later",
+  "timer.return": "Return",
+  "timer.running": "⏱ {title}, until {time}",
+  "timer.paused": {
+    "one": "⏸ {title}, {count} minute left",
+    "other": "⏸ {title}, {count} minutes left"
+  },
+  "timer.pausedLabel": "Paused",
+  "timer.ended": "⏰ Time's up: {title}",
+  "timer.stopped": "⏹ Timer stopped: {title}",
+  "timer.busy": "A timer is already running: {title}",
+  "timer.park.prompt": "What's the thought? Type or dictate it, it will go to the inbox",
+  "timer.thought": "Thought"
 }

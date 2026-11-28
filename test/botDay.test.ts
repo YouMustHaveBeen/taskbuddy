@@ -99,13 +99,16 @@ describe("бот: пять кнопок и карточка задачи", () =>
 
     await press(`d|${D}|important|0|accept`);
     const edited = sent("editMessageText").at(-1)!;
-    expect(buttons(edited).map((b) => b.text)).toEqual(["Сделано"]);
+    expect(buttons(edited).map((b) => b.text)).toEqual(["Сделано", "Таймер"]);
     expect(sent("sendMessage").at(-1)!.payload.text).toBe("Список на сегодня\n\n• позвонить маме");
     const user = await env.DB.prepare("SELECT list_message_id FROM users WHERE id = ?").bind(ann.id).first<{ list_message_id: number }>();
     expect(user?.list_message_id).toBe(1);
 
     const list = sent("sendMessage").at(-1)!;
-    expect(buttons(list).map((b) => [b.text, b.callback_data])).toEqual([["Сделано: позвонить маме", `l|${D}|important|0`]]);
+    expect(buttons(list).map((b) => [b.text, b.callback_data])).toEqual([
+      ["Сделано: позвонить маме", `l|${D}|important|0`],
+      ["Таймер", `tm|${D}|important|0`],
+    ]);
 
     await press(`d|${D}|important|0|done`);
     expect(sent("deleteMessage").at(-1)!.payload.message_id).toBe(1);

@@ -116,5 +116,33 @@
   "bot.stale": "Это уже изменилось, вот как сейчас",
   "bot.list.done": "Сделано: {title}",
   "action.takeToday": "Взять сегодня",
-  "action.remindTomorrow": "Напомнить снова завтра"
+  "action.remindTomorrow": "Напомнить снова завтра",
+  "action.timer": "Таймер",
+  "timer.minutes": {
+    "one": "{count} мин",
+    "few": "{count} мин",
+    "many": "{count} мин",
+    "other": "{count} мин"
+  },
+  "timer.pause": "Пауза",
+  "timer.resume": "Продолжить",
+  "timer.stop": "Стоп",
+  "timer.park": "Парковка",
+  "timer.finish": "Завершить",
+  "timer.again": "Продолжить",
+  "timer.later": "Продолжить позже",
+  "timer.return": "Вернуть",
+  "timer.running": "⏱ {title}, до {time}",
+  "timer.paused": {
+    "one": "⏸ {title}, осталась {count} минута",
+    "few": "⏸ {title}, осталось {count} минуты",
+    "many": "⏸ {title}, осталось {count} минут",
+    "other": "⏸ {title}, осталось {count} минуты"
+  },
+  "timer.pausedLabel": "На паузе",
+  "timer.ended": "⏰ Время вышло: {title}",
+  "timer.stopped": "⏹ Таймер остановлен: {title}",
+  "timer.busy": "Уже идет таймер: {title}",
+  "timer.park.prompt": "Какая мысль? Напиши или продиктуй, она уйдет в инбокс",
+  "timer.thought": "Мысль"
 }

@@ -1,11 +1,14 @@
 import type { Db } from "./client";
 
-/** Вопрос бота, ответом на который считается ответ на сообщение `messageId`; контекст — строка плана и карточка. */
+/**
+ * Вопрос бота, ответом на который считается ответ на сообщение `messageId`; контекст — строка плана и карточка.
+ * У вопросов таймера (`park`, `return`) строки плана нет: `slot` пустой, `cardMessageId` — сообщение таймера.
+ */
 export type BotPrompt = {
   userId: string;
   messageId: number;
   cardMessageId: number;
-  kind: "reason" | "blocks" | "survey";
+  kind: "reason" | "blocks" | "survey" | "return" | "park";
   date: string;
   slot: string;
   position: number;

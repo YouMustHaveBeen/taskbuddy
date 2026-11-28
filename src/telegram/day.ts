@@ -1,22 +1,18 @@
-import { InlineKeyboard, type Api } from "grammy/web";
-import { t, type Language, type TextKey } from "../../i18n";
+import { InlineKeyboard } from "grammy/web";
+import type { TextKey } from "../../i18n";
 import { createLoginLink } from "../core/auth";
 import { buttonSlots, day, localDate, type ButtonSlot, type DayResult, type PlanTask, type TodayView } from "../core/day";
 import { schedule } from "../core/schedule";
-import { dropPrompts, savePrompt, setListMessage, takePrompt, type BotPrompt } from "../db/botPrompts";
-import type { Db } from "../db/client";
+import { savePrompt, takePrompt, type BotPrompt } from "../db/botPrompts";
 import type { User } from "../db/users";
-
-/** Бот для одного пользователя: API Telegram, база, пользователь и адрес страницы (для ссылки входа). */
-export type Tg = { api: Api; db: Db; user: User; url: string };
+import { ask, clearPrompts, data, markAnswered, markStale, say, sendList, type Tg } from "./common";
+import { answerTimerPrompt, onTimerCallback, sendTimerChoice } from "./timer";
 
 type Step = "why" | "blocks";
 type Answer = "tomorrow" | "back" | "drop";
 const answers: readonly Answer[] = ["tomorrow", "back", "drop"];
 const answerLabels: Record<Answer, TextKey> = { tomorrow: "survey.tomorrow", back: "survey.back", drop: "action.delete" };
 
-const say = (user: User, key: TextKey, vars?: Record<string, string | number>) => t(user.language as Language, key, vars);
-const data = (...parts: (string | number)[]) => parts.join("|");
 const isButton = (slot: string): slot is ButtonSlot => (buttonSlots as readonly string[]).includes(slot);
 
 /** Текущая строка слота кнопки или строка «Выбрать» / «Подумай» по позиции. */
@@ -46,6 +42,7 @@ function card(user: User, date: string, task: PlanTask, step?: Step, note?: stri
   } else if (task.state === "accepted") {
     keyboard.text(say(user, "action.done"), act("done"));
     if (dopamine) keyboard.text(say(user, "action.close"), act("release"));
+    keyboard.text(say(user, "action.timer"), data("tm", date, task.slot, task.position));
   } else if (task.state === "refused") {
     if ((step ?? refusedStep(task)) === "why" && task.reasonPrompt) {
       lines.push("", say(user, "today.why", { why: task.reasonPrompt }));
@@ -86,47 +83,6 @@ async function showStale(tg: Tg, messageId: number, slot: string, position: numb
   if (task) await editCard(tg, messageId, view, task, undefined, undefined, true);
   else if (messageText) await markStale(tg, messageId, messageText);
   else await tg.api.editMessageReplyMarkup(tg.user.telegramId, messageId, { reply_markup: { inline_keyboard: [] } }).catch(() => undefined);
-}
-
-/** Вопрос, ответом на который считается ответ на это сообщение. */
-async function ask(tg: Tg, cardMessageId: number, prompt: Omit<BotPrompt, "userId" | "messageId" | "cardMessageId">, question: TextKey) {
-  const sent = await tg.api.sendMessage(tg.user.telegramId, `${say(tg.user, question)}\n${say(tg.user, "bot.replyHint")}`, {
-    reply_markup: { force_reply: true },
-  });
-  try {
-    await savePrompt(tg.db, { ...prompt, userId: tg.user.id, messageId: sent.message_id, cardMessageId }, Date.now());
-  } catch (error) {
-    // вопрос не записан: он удаляется из чата
-    await tg.api.deleteMessage(tg.user.telegramId, sent.message_id).catch(() => undefined);
-    throw error;
-  }
-}
-
-/** Убирает вопросы к карточке: по ним уже ответили кнопкой или пропустили. */
-async function clearPrompts(tg: Tg, cardMessageId: number) {
-  for (const messageId of await dropPrompts(tg.db, tg.user.id, cardMessageId)) {
-    await tg.api.deleteMessage(tg.user.telegramId, messageId).catch(() => undefined);
-  }
-}
-
-/** Список на сегодня: старое сообщение удаляется, новое присылается последним в чате. */
-export async function sendList(tg: Tg, view: TodayView): Promise<void> {
-  const lines = [say(tg.user, "bot.list.title"), ""];
-  if (view.list.length === 0) lines.push(say(tg.user, "bot.list.empty"));
-  for (const task of view.list) lines.push(`${task.state === "done" ? "✓" : "•"} ${task.title}`);
-  // «Сделано: название» под списком — для каждой принятой несделанной задачи
-  const keyboard = new InlineKeyboard();
-  for (const task of view.list.filter((row) => row.state === "accepted")) {
-    keyboard.text(say(tg.user, "bot.list.done", { title: task.title }), data("l", view.date, task.slot, task.position)).row();
-  }
-  if (tg.user.listMessageId !== null) {
-    await tg.api.deleteMessage(tg.user.telegramId, tg.user.listMessageId).catch(() => undefined);
-  }
-  const sent = await tg.api.sendMessage(tg.user.telegramId, lines.join("\n"), {
-    reply_markup: keyboard.inline_keyboard.length > 0 ? keyboard : undefined,
-  });
-  await setListMessage(tg.db, tg.user.id, sent.message_id);
-  tg.user.listMessageId = sent.message_id;
 }
 
 /** Утро: сообщение «Выдай мне дело» с пятью кнопками и список на сегодня. */
@@ -177,20 +133,6 @@ export async function sendDeadlines(tg: Tg, titles: string[]): Promise<void> {
     else chunks.push(line);
   }
   for (const chunk of chunks) await tg.api.sendMessage(tg.user.telegramId, chunk);
-}
-
-/** Сообщение без кнопок с отметкой выбранного ответа. */
-async function markAnswered(tg: Tg, messageId: number, text: string, label: TextKey) {
-  await tg.api.editMessageText(tg.user.telegramId, messageId, `${text}\n\n✓ ${say(tg.user, label)}`, {
-    reply_markup: { inline_keyboard: [] },
-  }).catch(() => undefined);
-}
-
-/** Кнопка устарела (задачу удалили или изменили): кнопки снимаются, на сообщении «Это уже изменилось». */
-async function markStale(tg: Tg, messageId: number, text: string) {
-  await tg.api.editMessageText(tg.user.telegramId, messageId, `${text}\n\n${say(tg.user, "bot.stale")}`, {
-    reply_markup: { inline_keyboard: [] },
-  }).catch(() => undefined);
 }
 
 /** После ответа опроса: следующий вопрос или «Опрос пройден», а если опрос открыл утро — пять кнопок и список. */
@@ -273,6 +215,19 @@ export async function onCallback(tg: Tg, messageId: number, messageText: string,
   const now = Date.now();
   if (parts[0] === "w" && parts.length === 1) {
     await sendLoginLink(tg, true);
+    return;
+  }
+
+  if (parts[0] === "tm" && parts.length === 4) {
+    const [, date, slot, rawPosition] = parts;
+    const view = await day.today(tg.db, tg.user, now);
+    const task = date === view.date ? findTask(view, slot, Number(rawPosition)) : undefined;
+    if (task && task.position === Number(rawPosition) && task.state === "accepted") await sendTimerChoice(tg, view.date, task);
+    else await showStale(tg, messageId, slot, Number(rawPosition), messageText);
+    return;
+  }
+  if (parts[0] === "ts" || parts[0] === "tn" || parts[0] === "t") {
+    await onTimerCallback(tg, messageId, messageText, parts, () => day.today(tg.db, tg.user, Date.now()));
     return;
   }
 
@@ -421,6 +376,10 @@ export async function onReply(tg: Tg, replyTo: number, text: string): Promise<bo
 }
 
 async function answerPrompt(tg: Tg, prompt: BotPrompt, text: string, now: number): Promise<void> {
+  if (prompt.kind === "park" || prompt.kind === "return") {
+    await answerTimerPrompt(tg, prompt, text);
+    return;
+  }
   const { cardMessageId, slot, position } = prompt;
   const today = localDate(now, tg.user.timezone);
   if (prompt.kind === "reason") {
