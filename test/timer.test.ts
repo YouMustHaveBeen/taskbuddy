@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TimerAlarm } from "../src/jobs/timerAlarm";
 import { api, call, createUser, mockTelegram, resetDb, type TelegramCall } from "./helpers";
 
-// дата в будущем: настоящий будильник Durable Object не срабатывает во время теста
+// не менять: настоящий будильник Durable Object сработал бы во время теста
 const NOW = "2054-11-10T12:00:00Z";
 const D = "2054-11-10";
 const from = { id: 1001, first_name: "Ann", language_code: "ru" };
