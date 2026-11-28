@@ -54,9 +54,10 @@ export async function planCandidates(db: Db, userId: string, now: number): Promi
   }));
 }
 
-export type PlanState = "offered" | "accepted" | "refused" | "done" | "returned" | "closed";
+export type PlanState = "offered" | "accepted" | "refused" | "done" | "returned" | "closed" | "tomorrow" | "dropped";
 
 export type PlanRow = TaskFlags & {
+  date: string;
   slot: PlanSlot;
   position: number;
   itemId: string;
@@ -72,9 +73,14 @@ export type PlanRow = TaskFlags & {
   flavor: "dopamine" | "frog" | null;
   firstStepText: string | null;
   deadline: number | null;
+  /** Дата последней неудачи задачи (отказ, «На завтра», «В хранилище»). */
+  lastFailOn: string | null;
+  /** Задача уже в архиве (например, отмечена выполненной на вкладке «Задачи»). */
+  archived: boolean;
 };
 
 type PlanRaw = Flags & {
+  date: string;
   slot: PlanSlot;
   position: number;
   item_id: string;
@@ -90,20 +96,26 @@ type PlanRaw = Flags & {
   flavor: "dopamine" | "frog" | null;
   first_step_text: string | null;
   deadline: number | null;
+  last_fail_on: string | null;
+  archived_at: number | null;
 };
 
-/** План дня с названиями и метками задач; первичный ключ day_plan (user_id, date, …), задача по первичному ключу. */
-const planSql = `SELECT d.slot, d.position, d.item_id, d.state, d.hidden, d.replacements, i.title,
+/**
+ * План дня с названиями и метками задач и принятые несделанные задачи прошлых дней (вечерний опрос по ним не пройден).
+ * Первичный ключ day_plan (user_id, date, …) по диапазону дат; задача по первичному ключу.
+ */
+const planSql = `SELECT d.date, d.slot, d.position, d.item_id, d.state, d.hidden, d.replacements, i.title,
     t.important, t.urgent, t.impactful, t.easy, t.why, t.flavor, t.first_step_text, t.deadline,
-    t.deferred, t.deferred_until, t.queued, t.waiting_for
+    t.deferred, t.deferred_until, t.queued, t.waiting_for, t.last_fail_on, i.archived_at
   FROM day_plan d
   JOIN items i ON i.id = d.item_id
   LEFT JOIN tasks t ON t.id = d.item_id
-  WHERE d.user_id = ? AND d.date = ?
-  ORDER BY d.slot, d.position`;
+  WHERE d.user_id = ?1 AND d.date <= ?2 AND (d.date = ?2 OR (d.state = 'accepted' AND i.archived_at IS NULL))
+  ORDER BY d.date, d.slot, d.position`;
 
 function planFromRaw(rows: PlanRaw[]): PlanRow[] {
   return rows.map((row) => ({
+    date: row.date,
     slot: row.slot,
     position: row.position,
     itemId: row.item_id,
@@ -119,6 +131,8 @@ function planFromRaw(rows: PlanRaw[]): PlanRow[] {
     flavor: row.flavor,
     firstStepText: row.first_step_text,
     deadline: row.deadline,
+    lastFailOn: row.last_fail_on,
+    archived: row.archived_at !== null,
     ...flags(row),
   }));
 }
@@ -158,16 +172,22 @@ const keyArgs = (key: PlanKey) => [key.userId, key.date, key.slot, key.position]
 export type PlanWrite = { changed: number; plan: PlanRow[] };
 
 /**
- * Выполняет записи одним batch и читает план. `changed` — число строк, измененных первой записью: она
- * проверяет, что строка плана была в ожидаемом состоянии; остальные записи цепляются за нее через changes()
- * и не выполняются, если первая ничего не изменила (повторное нажатие, параллельный запрос).
+ * Выполняет записи одним batch и читает план. `changed` — число строк, измененных записью-проверкой с номером
+ * `guard` (по умолчанию первой): она проверяет, что строка плана была в ожидаемом состоянии. Записи после нее
+ * цепляются за нее через changes(), записи до нее проверяют то же состояние сами; если проверка ничего
+ * не изменила (повторное нажатие, параллельный запрос), не выполняется ничего.
  */
-async function write(db: Db, key: Pick<PlanKey, "userId" | "date">, statements: D1PreparedStatement[]): Promise<PlanWrite> {
+async function write(
+  db: Db,
+  key: Pick<PlanKey, "userId" | "date">,
+  statements: D1PreparedStatement[],
+  guard = 0,
+): Promise<PlanWrite> {
   // QUERY BUDGET EXCEPTION: записи действия и чтение плана — один batch
   const d1 = db.$client;
   const results = await d1.batch([...statements, d1.prepare(planSql).bind(key.userId, key.date)]);
   return {
-    changed: results[0].meta.changes,
+    changed: results[guard].meta.changes,
     plan: planFromRaw(results[results.length - 1].results as PlanRaw[]),
   };
 }
@@ -233,31 +253,148 @@ export function addNextRow(db: Db, key: PlanKey, itemId: string, now: number): P
   return write(db, key, nextRowStatements(db, key, itemId, ["done", "closed"], 0, now));
 }
 
+/** Задача «Подумай, почему откладываешь», которая добавляется, когда задача становится лягушкой. */
+export type ThinkTask = { id: string; title: string; date: string };
+
 /**
- * Завершает отказ: счетчик отказов задачи растет на 1, ответ «Что мешает?» (если есть) идет в инсайты, а слот
- * получает замену `itemId` или закрывается, если замены нет.
+ * Неудача задачи (отказ, «На завтра», «В хранилище»): счетчик неудач растет на 1, но не чаще раза в день `date`.
+ * Если счетчик дошел до порога, задача без отметки становится лягушкой, и в план дня `think.date` добавляется
+ * новая задача `think`. Все записи выполняются, только если верно условие `pending` (строка плана еще ждет ответа).
+ */
+function failStatements(
+  db: Db,
+  userId: string,
+  itemId: string,
+  date: string,
+  pending: { sql: string; args: unknown[] },
+  frogAt: number,
+  think: ThinkTask,
+  now: number,
+): D1PreparedStatement[] {
+  const d1 = db.$client;
+  return [
+    d1
+      .prepare(
+        `UPDATE tasks SET skip_count = skip_count + 1, last_fail_on = ?
+        WHERE id = ? AND (last_fail_on IS NULL OR last_fail_on <> ?) AND ${pending.sql}`,
+      )
+      .bind(date, itemId, date, ...pending.args),
+    // не менять порядок: каждая следующая запись выполняется, только если предыдущая что-то изменила
+    d1
+      .prepare("UPDATE tasks SET flavor = 'frog', frog_auto = 1 WHERE changes() > 0 AND id = ? AND flavor IS NULL AND skip_count >= ?")
+      .bind(itemId, frogAt),
+    d1
+      .prepare(
+        `INSERT INTO items (id, kind, title, owner_id, creator_id, household_id, source, created_at, updated_at)
+        SELECT ?, 'task', ?, owner_id, owner_id, household_id, 'bot', ?, ? FROM items WHERE changes() > 0 AND id = ?`,
+      )
+      .bind(think.id, think.title, now, now, itemId),
+    d1.prepare("INSERT INTO tasks (id) SELECT ? WHERE changes() > 0").bind(think.id),
+    d1
+      .prepare(
+        `INSERT OR IGNORE INTO day_plan (user_id, date, slot, position, item_id, state, hidden, created_at)
+        SELECT ?1, ?2, 'think',
+          (SELECT COALESCE(MAX(position) + 1, 0) FROM day_plan WHERE user_id = ?1 AND date = ?2 AND slot = 'think'),
+          ?3, 'accepted', 0, ?4
+        WHERE changes() > 0`,
+      )
+      .bind(userId, think.date, think.id, now),
+  ];
+}
+
+function insightStatement(db: Db, userId: string, insight: { id: string; text: string }, pending: { sql: string; args: unknown[] }) {
+  return db.$client
+    .prepare(`INSERT INTO insights (id, user_id, text) SELECT ?, ?, ? WHERE ${pending.sql}`)
+    .bind(insight.id, userId, insight.text, ...pending.args);
+}
+
+/**
+ * Завершает отказ: неудача задачи (см. failStatements), ответ «Что мешает?» (если есть) идет в инсайты, а слот
+ * получает замену `replacement` или закрывается, если замены нет. Отказ ждет завершения, пока строка в «отказе»
+ * и следующей строки слота еще нет.
  */
 export function finishRefusal(
   db: Db,
   key: PlanKey,
+  itemId: string,
   replacement: string | undefined,
   insight: { id: string; text: string } | undefined,
+  frog: { at: number; think: ThinkTask },
   now: number,
 ): Promise<PlanWrite> {
   const d1 = db.$client;
-  const statements = replacement
-    ? nextRowStatements(db, key, replacement, ["refused"], 1, now)
-    : [d1.prepare(`UPDATE day_plan SET state = 'closed' WHERE ${keyWhere} AND state = 'refused'`).bind(...keyArgs(key))];
-  // changes() после предыдущей записи: 1, только если отказ действительно завершен этим запросом
-  statements.push(
-    d1.prepare(`UPDATE tasks SET skip_count = skip_count + 1 WHERE changes() > 0 AND id = ${itemOfRow}`).bind(...keyArgs(key)),
-  );
-  if (insight) {
+  const pending = {
+    sql: `EXISTS (SELECT 1 FROM day_plan r WHERE r.user_id = ? AND r.date = ? AND r.slot = ? AND r.position = ? AND r.state = 'refused'
+      AND NOT EXISTS (SELECT 1 FROM day_plan n WHERE n.user_id = r.user_id AND n.date = r.date AND n.slot = r.slot AND n.position = r.position + 1))`,
+    args: keyArgs(key),
+  };
+  const statements = failStatements(db, key.userId, itemId, key.date, pending, frog.at, frog.think, now);
+  if (insight) statements.push(insightStatement(db, key.userId, insight, pending));
+  const guard = statements.length;
+  if (replacement) statements.push(...nextRowStatements(db, key, replacement, ["refused"], 1, now));
+  else statements.push(d1.prepare(`UPDATE day_plan SET state = 'closed' WHERE ${keyWhere} AND state = 'refused'`).bind(...keyArgs(key)));
+  return write(db, key, statements, guard);
+}
+
+export type SurveyAnswer = "tomorrow" | "back" | "drop";
+const surveyStates: Record<SurveyAnswer, PlanState> = { tomorrow: "tomorrow", back: "returned", drop: "dropped" };
+
+/**
+ * Ответ вечернего опроса по принятой несделанной строке плана `key` (любого дня до `today` включительно).
+ * «На завтра»: задача принятой ставится в план дня `target`, если ее там еще нет, и это неудача. «В хранилище»:
+ * неудача. «Удалить»: задача в архив как неактуальная. Строка плана получает состояние ответа; план читается на `today`.
+ */
+export function answerSurvey(
+  db: Db,
+  key: PlanKey,
+  itemId: string,
+  answer: SurveyAnswer,
+  today: string,
+  target: string,
+  insight: { id: string; text: string } | undefined,
+  frog: { at: number; think: ThinkTask },
+  now: number,
+): Promise<PlanWrite> {
+  const d1 = db.$client;
+  const pending = {
+    sql: `EXISTS (SELECT 1 FROM day_plan d JOIN items i ON i.id = d.item_id
+      WHERE d.user_id = ? AND d.date = ? AND d.slot = ? AND d.position = ? AND d.state = 'accepted' AND i.archived_at IS NULL)`,
+    args: keyArgs(key),
+  };
+  const statements: D1PreparedStatement[] = [];
+  if (answer === "drop") {
     statements.push(
-      d1.prepare("INSERT INTO insights (id, user_id, text) SELECT ?, ?, ? WHERE changes() > 0").bind(insight.id, key.userId, insight.text),
+      d1
+        .prepare(
+          `UPDATE items SET archived_at = ?, archive_reason = 'irrelevant', updated_at = ?
+          WHERE id = ? AND owner_id = ? AND archived_at IS NULL AND ${pending.sql}`,
+        )
+        .bind(now, now, itemId, key.userId, ...pending.args),
     );
+  } else {
+    if (answer === "tomorrow") {
+      statements.push(
+        d1
+        .prepare(
+          `INSERT OR IGNORE INTO day_plan (user_id, date, slot, position, item_id, state, hidden, created_at)
+          SELECT ?, ?, 'picked',
+            (SELECT COALESCE(MAX(p.position) + 1, 0) FROM day_plan p WHERE p.user_id = ? AND p.date = ? AND p.slot = 'picked'),
+            ?, 'accepted', 0, ?
+          WHERE NOT EXISTS (SELECT 1 FROM day_plan e WHERE e.user_id = ? AND e.date = ? AND e.item_id = ?) AND ${pending.sql}`,
+        )
+        .bind(key.userId, target, key.userId, target, itemId, now, key.userId, target, itemId, ...pending.args),
+      );
+    }
+    statements.push(...failStatements(db, key.userId, itemId, key.date, pending, frog.at, frog.think, now));
+    if (insight) statements.push(insightStatement(db, key.userId, insight, pending));
   }
-  return write(db, key, statements);
+  const guard = statements.length;
+  statements.push(
+    d1
+      .prepare(`UPDATE day_plan SET state = ? WHERE ${keyWhere} AND state = 'accepted'`)
+      .bind(surveyStates[answer], ...keyArgs(key)),
+  );
+  return write(db, { userId: key.userId, date: today }, statements, guard);
 }
 
 /** «Выбрать»: выбранная вручную задача сразу принята; задача, которая сегодня уже в плане (в любом состоянии), не вставляется (индекс day_plan_item). */

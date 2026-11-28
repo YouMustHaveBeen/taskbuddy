@@ -31,6 +31,12 @@ export async function registerByInvite(
     language: pickLanguage(profile.languageCode),
     timezone: defaults.timezone,
     createdAt: now,
+    surveyOn: null,
+    morningOn: null,
+    repromptOn: null,
+    deadlineOn: null,
+    nightOn: null,
+    listMessageId: null,
   });
 }
 
