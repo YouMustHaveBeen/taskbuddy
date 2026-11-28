@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "c0544f45-1503-4fa0-a078-efcf7ded5cf2",
+  "id": "d939d416-a90b-4eac-a5a2-38238cc9bcc5",
   "prevId": "458a0dd4-ddd6-4d56-a0af-7e7ba21f319b",
   "tables": {
     "action_kinds": {
@@ -1576,19 +1576,6 @@
             "id"
           ],
           "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "timers_item_id_items_id_fk": {
-          "name": "timers_item_id_items_id_fk",
-          "tableFrom": "timers",
-          "tableTo": "items",
-          "columnsFrom": [
-            "item_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },

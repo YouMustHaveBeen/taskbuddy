@@ -5,7 +5,7 @@ import { items } from "../core/items";
 import { defaults } from "../core/settings";
 import { timer, type TimerResult, type TimerView } from "../core/timer";
 import type { BotPrompt } from "../db/botPrompts";
-import { ask, clearPrompts, data, markAnswered, markStale, say, sendList, type Tg } from "./day";
+import { ask, clearPrompts, data, markAnswered, markStale, say, sendList, type Tg } from "./common";
 
 /** Как показан таймер: идет или на паузе, «Стоп» нажат или время вышло. */
 type Shown = "live" | "stopped" | "ended";
@@ -64,10 +64,17 @@ export async function sendTimerChoice(tg: Tg, date: string, task: PlanTask): Pro
   });
 }
 
-/** Таймер уже идет: сообщение «Уже идет таймер» с текущим таймером; таймер дальше показывается в нем. */
+/** Таймер уже идет: «Уже идет таймер»; таймер из бота дальше показывается в этом сообщении, прежнее удаляется. */
 async function sendBusy(tg: Tg, current: TimerView) {
-  const text = `${say(tg.user, "timer.busy", { title: current.title })}\n\n${timerText(tg, current, "stopped")}`;
+  const busy = say(tg.user, "timer.busy", { title: current.title });
+  // таймер, запущенный на странице, в боте не показывается
+  if (current.startedIn === "web") {
+    await tg.api.sendMessage(tg.user.telegramId, busy);
+    return;
+  }
+  const text = `${busy}\n\n${timerText(tg, current, "stopped")}`;
   const sent = await tg.api.sendMessage(tg.user.telegramId, text, { reply_markup: timerKeyboard(tg, current) });
+  if (current.botMessageId !== null) await tg.api.deleteMessage(tg.user.telegramId, current.botMessageId).catch(() => undefined);
   await timer.setMessage(tg.db, tg.user.id, current.itemId, sent.message_id);
 }
 

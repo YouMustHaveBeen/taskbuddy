@@ -242,7 +242,10 @@ function view(date: string, plan: PlanRow[], now: number, timezone: string): Tod
       result.survey.push(task);
     }
     if (row.date !== date || locked) continue;
-    if (row.slot === "deadline") result.deadlines.push(task);
+    // вернутый в хранилище дедлайн в сегодняшнем плане не показывается
+    if (row.slot === "deadline") {
+      if (row.state !== "returned") result.deadlines.push(task);
+    }
     else if (row.slot === "picked" || row.slot === "think") {
       // перенесенная опросом, возвращенная в хранилище или удаленная задача в сегодняшнем плане не показывается
       if (row.state === "accepted" || row.state === "done") result.picked.push(task);

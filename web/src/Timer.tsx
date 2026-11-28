@@ -19,9 +19,6 @@ type Text = (key: TextKey, params?: Record<string, string | number>) => string;
 /** Ответ запросов таймера: таймер и, после кнопок завершения, план дня. */
 export type TimerReply<Today> = { timer: TimerView | null; today?: Today };
 
-/** Длины таймера (настройка timerMinutes). */
-export const timerMinutes = [5, 10, 15, 25] as const;
-
 /** Короткий звук в конце таймера. */
 function beep() {
   try {
@@ -43,10 +40,10 @@ function beep() {
 const clock = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 
 /** Кнопки длины таймера. */
-export function Lengths(props: { text: Text; onPick: (minutes: number) => void }) {
+export function Lengths(props: { text: Text; minutes: number[]; onPick: (minutes: number) => void }) {
   return (
     <div className="actions">
-      {timerMinutes.map((minutes) => (
+      {props.minutes.map((minutes) => (
         <button key={minutes} type="button" onClick={() => props.onPick(minutes)}>
           {props.text("timer.minutes", { count: minutes })}
         </button>
@@ -56,12 +53,13 @@ export function Lengths(props: { text: Text; onPick: (minutes: number) => void }
 }
 
 /** «Таймер» у задачи: по нажатию — кнопки длины. */
-export function TimerButton(props: { text: Text; onStart: (minutes: number) => void }) {
+export function TimerButton(props: { text: Text; minutes: number[]; onStart: (minutes: number) => void }) {
   const [open, setOpen] = useState(false);
   if (open) {
     return (
       <Lengths
         text={props.text}
+        minutes={props.minutes}
         onPick={(minutes) => {
           setOpen(false);
           props.onStart(minutes);
@@ -79,6 +77,8 @@ export function TimerButton(props: { text: Text; onStart: (minutes: number) => v
 type PanelProps<Today> = {
   timer: TimerView;
   text: Text;
+  /** Длины таймера (настройка timerMinutes). */
+  minutes: number[];
   /** Спросить «Что мешает?» перед «Вернуть». */
   askBlocks: boolean;
   onReply: (reply: TimerReply<Today>) => void;
@@ -86,11 +86,12 @@ type PanelProps<Today> = {
 };
 
 /** Таймер над «Пять задач»: отсчет мм:сс, «Пауза», «Стоп», «Парковка»; после остановки — четыре кнопки. */
-export function TimerPanel<Today>({ timer, text, askBlocks, onReply, onFailed }: PanelProps<Today>) {
+export function TimerPanel<Today>({ timer, text, minutes, askBlocks, onReply, onFailed }: PanelProps<Today>) {
   const [now, setNow] = useState(() => Date.now());
   const [step, setStep] = useState<"park" | "again" | "back">();
   const [draft, setDraft] = useState("");
   const [parked, setParked] = useState(false);
+  const [parking, setParking] = useState(false);
   const rang = useRef<number | null>(null);
 
   const running = timer.state === "running" && timer.endsAt !== null;
@@ -131,7 +132,9 @@ export function TimerPanel<Today>({ timer, text, askBlocks, onReply, onFailed }:
   };
 
   const park = async () => {
+    setParking(true);
     const result = await api("POST", "/timer/park", { text: draft });
+    setParking(false);
     if (!result.ok) {
       onFailed(result.status);
       return;
@@ -142,11 +145,10 @@ export function TimerPanel<Today>({ timer, text, askBlocks, onReply, onFailed }:
   };
 
   return (
-    <div className="block timer" role="timer" aria-live="polite">
-      {ended ? (
-        <p>{text("timer.ended", { title: timer.title })}</p>
-      ) : (
-        <p className="timer-clock">
+    <div className="block timer">
+      <p aria-live="polite">{ended ? text("timer.ended", { title: timer.title }) : ""}</p>
+      {!ended && (
+        <p className="timer-clock" role="timer">
           <strong>{timer.title}</strong>{" "}
           {clock(left)}
           {timer.state === "paused" && <span className="meta">{text("timer.pausedLabel")}</span>}
@@ -179,13 +181,13 @@ export function TimerPanel<Today>({ timer, text, askBlocks, onReply, onFailed }:
             <span>{text("timer.thought")}</span>
             <textarea value={draft} onChange={(event) => setDraft(event.target.value)} />
           </label>
-          <button type="button" disabled={draft.trim() === ""} onClick={() => void park()}>
+          <button type="button" disabled={parking || draft.trim() === ""} onClick={() => void park()}>
             {text("action.save")}
           </button>
         </>
       )}
       {!ended && parked && step !== "park" && <p className="hint">👍</p>}
-      {ended && step === undefined && (
+      {ended && (step === undefined || step === "park") && (
         <div className="actions">
           <button type="button" className="primary" onClick={() => void close("finish")}>
             {text("timer.finish")}
@@ -201,7 +203,7 @@ export function TimerPanel<Today>({ timer, text, askBlocks, onReply, onFailed }:
           </button>
         </div>
       )}
-      {ended && step === "again" && <Lengths text={text} onPick={(minutes) => void send(`again/${minutes}`)} />}
+      {ended && step === "again" && <Lengths text={text} minutes={minutes} onPick={(length) => void send(`again/${length}`)} />}
       {ended && step === "back" && (
         <>
           <label className="field">

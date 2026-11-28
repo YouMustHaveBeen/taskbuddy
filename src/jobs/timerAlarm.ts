@@ -19,13 +19,21 @@ export class TimerAlarm extends DurableObject<Env> {
     if (!userId) return;
     const db = createDb(this.env.DB);
     // пауза, «Стоп» или «Сделано» раньше окончания: таймер не меняется; «Продолжить» сам ставит будильник заново
-    const result = await timer.expire(db, userId, Date.now());
+    const now = Date.now();
+    const result = await timer.expire(db, userId, now);
     const current = result.timer;
     if (result.outcome !== "ok" || !current || current.startedIn !== "bot") return;
     const user = await findUserById(db, userId);
     if (!user) return;
     const api = new Api(this.env.TELEGRAM_BOT_TOKEN);
-    await sendTimerEnded({ api, db, user, url: this.env.PUBLIC_URL, alarm: timerAlarms(this.env) }, current);
+    try {
+      await sendTimerEnded({ api, db, user, url: this.env.PUBLIC_URL, alarm: timerAlarms(this.env) }, current);
+    } catch (error) {
+      // таймер снова ждет будильника; ошибка в alarm() запускает его повтор
+      console.error("timer end send failed", error instanceof Error ? error.name : "unknown");
+      await timer.restore(db, userId, current.itemId, now);
+      throw error;
+    }
   }
 }
 

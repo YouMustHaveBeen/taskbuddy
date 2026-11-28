@@ -91,7 +91,7 @@ export function startTimer(
   );
 }
 
-/** «Пауза»: остаток в секундах (с округлением вверх) запоминается, время останавливается. */
+/** «Пауза»: пока время не вышло, остаток в секундах (с округлением вверх) запоминается, время останавливается. */
 export function pauseTimer(db: Db, userId: string, now: number): Promise<TimerWrite> {
   return write(
     db,
@@ -99,10 +99,18 @@ export function pauseTimer(db: Db, userId: string, now: number): Promise<TimerWr
     db.$client
       .prepare(
         `UPDATE timers SET paused_at = ?1, remaining_sec = MAX(0, CAST((ends_at - ?1 + 999) / 1000 AS INTEGER)), ends_at = NULL
-        WHERE user_id = ?2 AND ends_at IS NOT NULL`,
+        WHERE user_id = ?2 AND ends_at > ?1`,
       )
       .bind(now, userId),
   );
+}
+
+/** Возвращает остановленному будильником таймеру время окончания `endsAt` (сообщение «Время вышло» не отправилось). */
+export async function restoreTimer(db: Db, userId: string, itemId: string, endsAt: number): Promise<void> {
+  await db.$client
+    .prepare("UPDATE timers SET ends_at = ? WHERE user_id = ? AND item_id = ? AND ends_at IS NULL AND paused_at IS NULL")
+    .bind(endsAt, userId, itemId)
+    .run();
 }
 
 /** «Продолжить» после паузы: время идет дальше с того же остатка. */

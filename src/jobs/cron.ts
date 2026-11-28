@@ -3,7 +3,8 @@ import { schedule, type UserTick } from "../core/schedule";
 import { createDb } from "../db/client";
 import type { Env } from "../env";
 import { timerAlarms } from "./timerAlarm";
-import { sendDeadlines, sendMorning, sendReminder, sendSurvey, type Tg } from "../telegram/day";
+import type { Tg } from "../telegram/common";
+import { sendDeadlines, sendMorning, sendReminder, sendSurvey } from "../telegram/day";
 
 /** Запуск расписания (cron раз в 5 минут): события дня и напоминания отправляются в бот. */
 export async function runSchedule(env: Env, now: number): Promise<void> {

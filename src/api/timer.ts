@@ -4,7 +4,7 @@ import type { TextKey } from "../../i18n";
 import { items } from "../core/items";
 import { timer, type TimerOutcome, type TimerResult, type TimerView } from "../core/timer";
 import { timerAlarms } from "../jobs/timerAlarm";
-import type { Tg } from "../telegram/day";
+import type { Tg } from "../telegram/common";
 import { showTimerInBot } from "../telegram/timer";
 import { requireUser, type ApiEnv } from "./session";
 
@@ -52,11 +52,10 @@ timerRoutes.post("/timer/start/:slot/:position/:minutes", requireUser, async (c)
 });
 
 timerRoutes.post("/timer/again/:minutes", requireUser, async (c) => {
-  const before = await timer.current(c.var.db, c.var.user.id);
   const result = await timer.again(c.var.db, c.var.user, Date.now(), Number(c.req.param("minutes")), "web");
   await arm(c, result);
   // таймер из бота продолжен на странице: дальше он показывается на странице, сообщение бота отмечается
-  if (result.outcome === "ok") syncBot(c, before, undefined, "timer.again");
+  if (result.outcome === "ok") syncBot(c, result.previous, undefined, "timer.again");
   return reply(c, result);
 });
 

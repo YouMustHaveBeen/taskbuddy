@@ -185,9 +185,47 @@ describe("таймер на странице", () => {
     const item = await env.DB.prepare("SELECT title, source FROM items WHERE owner_id = ?").bind(ann.id).first();
     expect(item).toMatchObject({ title: "записаться к врачу", source: "web" });
   });
+  it("«Пауза» после окончания времени не принимается, даже если будильник еще не сработал", async () => {
+    await accepted();
+    await post("/timer/start/important/0/5");
+    later(6);
+    expect((await post("/timer/pause")).status).toBe(400);
+  });
+
+  it("«Вернуть» у дедлайна: дедлайн уходит из блока дедлайнов", async () => {
+    const id = await insertTask("сдать отчет", { deadline: Date.parse(NOW) + 86_400_000 });
+    expect((await today() as Today & { deadlines: Row[] }).deadlines).toMatchObject([{ itemId: id, state: "offered" }]);
+    await post("/timer/start/deadline/0/5");
+    await post("/timer/stop");
+    expect((await post("/timer/back")).status).toBe(200);
+    expect((await today() as Today & { deadlines: Row[] }).deadlines).toEqual([]);
+  });
 });
 
 describe("таймер в боте", () => {
+  it("«Таймер» в боте, пока идет таймер со страницы: «Уже идет таймер» без кнопок таймера", async () => {
+    await accepted();
+    await post("/timer/start/important/0/10");
+    await press(`ts|${D}|important|0|5`, 70);
+    const busy = sent("sendMessage").at(-1)!;
+    expect(busy.payload.text).toBe("Уже идет таймер: позвонить маме");
+    expect(buttons(busy)).toEqual([]);
+    expect((await today()).timer?.botMessageId).toBeNull();
+  });
+
+  it("«Время вышло» не отправилось: таймер снова ждет будильника, повтор отправляет сообщение", async () => {
+    await accepted();
+    await press(`ts|${D}|important|0|5`, 60);
+    later(5);
+    const stub = env.TIMERS.get(env.TIMERS.idFromName(ann.id));
+    vi.mocked(globalThis.fetch).mockImplementationOnce(async () => Response.json({ ok: false, error_code: 500, description: "x" }, { status: 500 }));
+    vi.mocked(globalThis.fetch).mockImplementationOnce(async () => Response.json({ ok: false, error_code: 500, description: "x" }, { status: 500 }));
+    await expect(runInDurableObject(stub, (instance) => (instance as TimerAlarm).alarm())).rejects.toThrow();
+    expect((await today()).timer?.state).toBe("running");
+    await runInDurableObject(stub, (instance) => (instance as TimerAlarm).alarm());
+    expect(sent("sendMessage").at(-1)!.payload.text).toBe("⏰ Время вышло: позвонить маме");
+  });
+
   it("«Таймер» → длина → сообщение «⏱ до»; будильник присылает «Время вышло» с четырьмя кнопками", async () => {
     await accepted();
     await press(`tm|${D}|important|0`);
@@ -226,7 +264,8 @@ describe("таймер в боте", () => {
     await press("t|p", 60);
     expect(sent("editMessageText").at(-1)!.payload.text).toBe("⏸ позвонить маме, осталось 24 минуты");
     await press(`ts|${D}|important|0|5`, 70);
-    expect(sent("deleteMessage").at(-1)!.payload.message_id).toBe(70);
+    // сообщение с длинами и прежнее сообщение таймера удаляются
+    expect(sent("deleteMessage").map((c) => c.payload.message_id)).toEqual([70, 60]);
     expect(sent("sendMessage").at(-1)!.payload.text).toMatch(/^Уже идет таймер: позвонить маме/);
   });
 

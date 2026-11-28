@@ -4,6 +4,7 @@ import {
   expireTimer,
   loadTimer,
   pauseTimer,
+  restoreTimer,
   resumeTimer,
   setTimerMessage,
   startTimer,
@@ -17,7 +18,8 @@ import { defaults } from "./settings";
 export type TimerState = "running" | "paused" | "ended";
 export type TimerView = Omit<TimerRow, "pausedAt"> & { state: TimerState };
 export type TimerOutcome = "ok" | "invalid" | "not_found" | "busy";
-export type TimerResult = { outcome: TimerOutcome; timer?: TimerView; today?: TodayView };
+/** `previous` — таймер до «Продолжить» (у `again`). */
+export type TimerResult = { outcome: TimerOutcome; timer?: TimerView; today?: TodayView; previous?: TimerView };
 
 /** Идет (есть время окончания), на паузе или остановлен (время вышло или нажали «Стоп»). */
 function view(row: TimerRow | undefined): TimerView | undefined {
@@ -92,7 +94,7 @@ export const timer = {
     const today = await day.today(db, user, now);
     const row = workRows(today).find((task) => task.itemId === current.itemId);
     if (!row) return { outcome: "not_found", timer: current, today };
-    return startFor(db, user, now, row, minutes, place, botMessageId);
+    return { ...(await startFor(db, user, now, row, minutes, place, botMessageId)), previous: current };
   },
 
   async pause(db: Db, userId: string, now: number): Promise<TimerResult> {
@@ -110,6 +112,11 @@ export const timer = {
   /** Будильник: если время таймера вышло, таймер останавливается (в ответе ok и таймер); иначе — текущий таймер. */
   async expire(db: Db, userId: string, now: number): Promise<TimerResult> {
     return changedOr(await expireTimer(db, userId, now));
+  },
+
+  /** «Время вышло» не отправилось: таймер снова ждет будильника с окончанием `endsAt`. */
+  async restore(db: Db, userId: string, itemId: string, endsAt: number): Promise<void> {
+    await restoreTimer(db, userId, itemId, endsAt);
   },
 
   async setMessage(db: Db, userId: string, itemId: string, messageId: number | null): Promise<void> {

@@ -31,6 +31,7 @@ type TodayView = {
   done: number;
   ringTasks: number;
   timer: TimerView | null;
+  timerMinutes: number[];
 };
 type Answer = "tomorrow" | "back" | "drop";
 type Step = "why" | "write" | "blocks";
@@ -64,7 +65,8 @@ export function Today({ language, onSignedOut, ring }: Props) {
   const [notice, setNotice] = useState<TextKey>();
   const [busy, setBusy] = useState(false);
   /** План дня из ответа действия (без таймера): таймер остается прежним. */
-  const setPlan = (plan: Omit<TodayView, "timer">) => setView((current) => ({ ...plan, timer: current?.timer ?? null }));
+  const setPlan = (plan: Omit<TodayView, "timer" | "timerMinutes">) =>
+    setView((current) => ({ ...plan, timer: current?.timer ?? null, timerMinutes: current?.timerMinutes ?? [] }));
   // из бота кнопка «Выбрать» открывает страницу сразу в режиме выбора
   const [choosing, setChoosing] = useState(() => ring && new URLSearchParams(location.search).has("pick"));
   // после открытия ?pick=1 убирается из адреса
@@ -95,7 +97,7 @@ export function Today({ language, onSignedOut, ring }: Props) {
   }, [load]);
 
   /** Ответ таймера: новый таймер и, после кнопок завершения, свежий план дня. */
-  const onTimer = (reply: TimerReply<Omit<TodayView, "timer">>) => {
+  const onTimer = (reply: TimerReply<Omit<TodayView, "timer" | "timerMinutes">>) => {
     setView((current) => (current ? { ...current, ...(reply.today ?? {}), timer: reply.timer } : current));
     setFailed(false);
   };
@@ -136,6 +138,8 @@ export function Today({ language, onSignedOut, ring }: Props) {
     if (result.data) {
       setPlan(result.data);
       setFailed(false);
+      // ответ опроса снимает таймер задачи: план и таймер перечитываются
+      if (view?.timer?.itemId === row.itemId) void load();
     } else setFailed(true);
     return result.ok;
   };
@@ -177,10 +181,11 @@ export function Today({ language, onSignedOut, ring }: Props) {
       )}
       {busy && view.timer && <p className="hint">{text("timer.busy", { title: view.timer.title })}</p>}
       {view.timer && (
-        <TimerPanel<Omit<TodayView, "timer">>
+        <TimerPanel<Omit<TodayView, "timer" | "timerMinutes">>
           key={`${view.timer.itemId}-${view.timer.startedAt}`}
           timer={view.timer}
           text={text}
+          minutes={view.timerMinutes}
           askBlocks={workRows(view).some((row) => row.itemId === view.timer?.itemId && row.askBlocks && row.flavor !== "dopamine")}
           onReply={(reply) => {
             setBusy(false);
@@ -206,7 +211,7 @@ export function Today({ language, onSignedOut, ring }: Props) {
                     <button type="button" onClick={() => void run("deadline", row.position, "done")}>
                       {text("action.done")}
                     </button>
-                    <TimerButton text={text} onStart={(minutes) => void startTimer(row, minutes)} />
+                    <TimerButton text={text} minutes={view.timerMinutes} onStart={(minutes) => void startTimer(row, minutes)} />
                   </span>
                 )}
               </li>
@@ -218,7 +223,7 @@ export function Today({ language, onSignedOut, ring }: Props) {
         <h2>{text("today.fiveTasks")}</h2>
         <div className="slots">
           {slots.map((slot) => (
-            <SlotCard key={slot} slot={slot} row={view.buttons[slot]} text={text} run={run} startTimer={startTimer} />
+            <SlotCard key={slot} slot={slot} row={view.buttons[slot]} text={text} run={run} startTimer={startTimer} minutes={view.timerMinutes} />
           ))}
           <button type="button" onClick={() => setChoosing(!choosing)} aria-expanded={choosing}>
             {text("slot.pick")}
@@ -235,7 +240,7 @@ export function Today({ language, onSignedOut, ring }: Props) {
                     <button type="button" onClick={() => void run(row.slot, row.position, "done")}>
                       {text("action.done")}
                     </button>
-                    {row.state === "accepted" && <TimerButton text={text} onStart={(minutes) => void startTimer(row, minutes)} />}
+                    {row.state === "accepted" && <TimerButton text={text} minutes={view.timerMinutes} onStart={(minutes) => void startTimer(row, minutes)} />}
                   </span>
                 )}
               </li>
@@ -326,8 +331,15 @@ function workRows(view: TodayView): PlanRow[] {
   return rows.filter((row) => row.state === "accepted" || (row.slot === "deadline" && row.state === "offered"));
 }
 
-function SlotCard(props: { slot: Slot; row?: PlanRow; text: Text; run: Run; startTimer: (row: PlanRow, minutes: number) => Promise<void> }) {
-  const { slot, row, text, run, startTimer } = props;
+function SlotCard(props: {
+  slot: Slot;
+  row?: PlanRow;
+  text: Text;
+  run: Run;
+  startTimer: (row: PlanRow, minutes: number) => Promise<void>;
+  minutes: number[];
+}) {
+  const { slot, row, text, run, startTimer, minutes } = props;
   const [step, setStep] = useState<Step>();
   const label = text(slotLabels[slot]);
   if (!row) return <button type="button" disabled>{label}</button>;
@@ -391,7 +403,7 @@ function SlotCard(props: { slot: Slot; row?: PlanRow; text: Text; run: Run; star
               {text("action.close")}
             </button>
           )}
-          <TimerButton text={text} onStart={(minutes) => void startTimer(row, minutes)} />
+          <TimerButton text={text} minutes={minutes} onStart={(length) => void startTimer(row, length)} />
         </div>
       </div>
     );

@@ -315,9 +315,8 @@ export const timers = sqliteTable("timers", {
     .primaryKey()
     .references(() => users.id),
   kind: text("kind", { enum: ["task", "zone", "reward"] }).notNull(),
-  itemId: text("item_id")
-    .notNull()
-    .references(() => items.id, { onDelete: "cascade" }),
+  /** Задача (items.id), зона или награда — по `kind`. */
+  itemId: text("item_id").notNull(),
   minutes: integer("minutes").notNull(),
   startedAt: integer("started_at").notNull(),
   pausedAt: integer("paused_at"),
