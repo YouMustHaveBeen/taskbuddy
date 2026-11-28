@@ -91,11 +91,10 @@ async function started(tg: Tg, messageId: number, messageText: string, result: T
   }
 }
 
-/** Время вышло (будильник): сообщение «Время вышло» с четырьмя кнопками приходит заново, прежнее удаляется. */
-export async function sendTimerEnded(tg: Tg, current: TimerView): Promise<void> {
-  if (current.botMessageId !== null) await tg.api.deleteMessage(tg.user.telegramId, current.botMessageId).catch(() => undefined);
+/** Время вышло (будильник): «Время вышло» с четырьмя кнопками приходит новым сообщением; возвращает его номер. */
+export async function sendTimerEnded(tg: Tg, current: TimerView): Promise<number> {
   const sent = await tg.api.sendMessage(tg.user.telegramId, timerText(tg, current, "ended"), { reply_markup: timerKeyboard(tg, current) });
-  await timer.setMessage(tg.db, tg.user.id, current.itemId, sent.message_id);
+  return sent.message_id;
 }
 
 /** Таймер изменили на странице: сообщение таймера в боте показывает то же; после кнопок завершения — отмечается ответ. */
@@ -143,7 +142,7 @@ export async function onTimerCallback(tg: Tg, messageId: number, messageText: st
     return;
   }
   if (parts[0] !== "t" || parts.length !== 2) return;
-  const current = await timer.current(tg.db, tg.user.id);
+  const current = await timer.current(tg.db, tg.user.id, Date.now());
   if (!current || current.botMessageId !== messageId) {
     await markStale(tg, messageId, messageText);
     return;
@@ -155,7 +154,7 @@ export async function onTimerCallback(tg: Tg, messageId: number, messageText: st
         ? await timer.pause(tg.db, tg.user.id, now)
         : action === "r"
           ? await timer.resume(tg.db, tg.user.id, now)
-          : await timer.stop(tg.db, tg.user.id);
+          : await timer.stop(tg.db, tg.user.id, now);
     if (result.timer) await editTimer(tg, messageId, result.timer, "stopped");
     if (action === "r") await arm(tg, result.timer);
     return;
@@ -203,7 +202,7 @@ export async function answerTimerPrompt(tg: Tg, prompt: BotPrompt, text: string)
     await items.addInbox(tg.db, tg.user.id, text, "bot");
     return;
   }
-  const current = await timer.current(tg.db, tg.user.id);
+  const current = await timer.current(tg.db, tg.user.id, Date.now());
   if (!current || current.botMessageId !== prompt.cardMessageId) return;
   await close(tg, prompt.cardMessageId, timerText(tg, current, "stopped"), "back", text);
 }

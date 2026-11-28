@@ -187,7 +187,7 @@ describe("таймер на странице", () => {
   });
   it("«Пауза» после окончания времени не принимается, даже если будильник еще не сработал", async () => {
     await accepted();
-    await post("/timer/start/important/0/5");
+    expect((await post("/timer/start/important/0/5")).status).toBe(200);
     later(6);
     expect((await post("/timer/pause")).status).toBe(400);
   });
@@ -213,17 +213,34 @@ describe("таймер в боте", () => {
     expect((await today()).timer?.botMessageId).toBeNull();
   });
 
-  it("«Время вышло» не отправилось: таймер снова ждет будильника, повтор отправляет сообщение", async () => {
+  it("«Время вышло» не отправилось: таймер в базе не меняется, повтор будильника отправляет сообщение", async () => {
     await accepted();
     await press(`ts|${D}|important|0|5`, 60);
     later(5);
     const stub = env.TIMERS.get(env.TIMERS.idFromName(ann.id));
     vi.mocked(globalThis.fetch).mockImplementationOnce(async () => Response.json({ ok: false, error_code: 500, description: "x" }, { status: 500 }));
-    vi.mocked(globalThis.fetch).mockImplementationOnce(async () => Response.json({ ok: false, error_code: 500, description: "x" }, { status: 500 }));
     await expect(runInDurableObject(stub, (instance) => (instance as TimerAlarm).alarm())).rejects.toThrow();
-    expect((await today()).timer?.state).toBe("running");
+    // время вышло: таймер показывается остановленным, хотя будильник еще не сработал
+    expect((await today()).timer).toMatchObject({ state: "ended", endsAt: Date.parse(NOW) + 5 * 60_000 });
     await runInDurableObject(stub, (instance) => (instance as TimerAlarm).alarm());
     expect(sent("sendMessage").at(-1)!.payload.text).toBe("⏰ Время вышло: позвонить маме");
+    expect((await today()).timer).toMatchObject({ state: "ended", endsAt: null, botMessageId: 1 });
+  });
+
+  it("таймер изменили, пока будильник отправлял «Время вышло»: таймер не меняется, новое сообщение удаляется", async () => {
+    await accepted();
+    await press(`ts|${D}|important|0|5`, 60);
+    later(5);
+    const stub = env.TIMERS.get(env.TIMERS.idFromName(ann.id));
+    const send = vi.mocked(globalThis.fetch).getMockImplementation()!;
+    vi.mocked(globalThis.fetch).mockImplementationOnce(async (input, init) => {
+      // пока сообщение отправляется, таймер той же задачи запускают заново
+      await env.DB.prepare("UPDATE timers SET ends_at = ends_at + 60000 WHERE user_id = ?").bind(ann.id).run();
+      return send(input, init);
+    });
+    await runInDurableObject(stub, (instance) => (instance as TimerAlarm).alarm());
+    expect(sent("deleteMessage").at(-1)!.payload.message_id).toBe(1);
+    expect((await today()).timer).toMatchObject({ state: "running", botMessageId: 60 });
   });
 
   it("«Таймер» → длина → сообщение «⏱ до»; будильник присылает «Время вышло» с четырьмя кнопками", async () => {

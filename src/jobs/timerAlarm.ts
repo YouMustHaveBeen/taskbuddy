@@ -13,27 +13,29 @@ export class TimerAlarm extends DurableObject<Env> {
     await this.ctx.storage.setAlarm(at);
   }
 
-  /** Время вышло: таймер останавливается; если его запустили в боте, в бот приходит «Время вышло» с четырьмя кнопками. */
+  /**
+   * Время вышло: таймер, запущенный в боте, сначала присылает «Время вышло» с четырьмя кнопками, затем останавливается;
+   * запущенный на странице — только останавливается. Ошибка отправки в Telegram запускает повтор будильника.
+   */
   async alarm(): Promise<void> {
     const userId = await this.ctx.storage.get<string>("user");
     if (!userId) return;
     const db = createDb(this.env.DB);
-    // пауза, «Стоп» или «Сделано» раньше окончания: таймер не меняется; «Продолжить» сам ставит будильник заново
     const now = Date.now();
-    const result = await timer.expire(db, userId, now);
-    const current = result.timer;
-    if (result.outcome !== "ok" || !current || current.startedIn !== "bot") return;
-    const user = await findUserById(db, userId);
-    if (!user) return;
-    const api = new Api(this.env.TELEGRAM_BOT_TOKEN);
-    try {
-      await sendTimerEnded({ api, db, user, url: this.env.PUBLIC_URL, alarm: timerAlarms(this.env) }, current);
-    } catch (error) {
-      // таймер снова ждет будильника; ошибка в alarm() запускает его повтор
-      console.error("timer end send failed", error instanceof Error ? error.name : "unknown");
-      await timer.restore(db, userId, current.itemId, now);
-      throw error;
+    const current = await timer.current(db, userId, now);
+    // пауза, «Стоп» или «Сделано» раньше окончания: таймер не меняется; «Продолжить» сам ставит будильник заново
+    if (!timer.due(current, now)) return;
+    const user = current.startedIn === "bot" ? await findUserById(db, userId) : undefined;
+    if (!user) {
+      await timer.expire(db, userId, current.endsAt, null);
+      return;
     }
+    const tg = { api: new Api(this.env.TELEGRAM_BOT_TOKEN), db, user, url: this.env.PUBLIC_URL, alarm: timerAlarms(this.env) };
+    const messageId = await sendTimerEnded(tg, current);
+    // таймер изменили, пока отправлялось сообщение: новое сообщение уже не нужно; иначе удаляется прежнее
+    const expired = await timer.expire(db, userId, current.endsAt, messageId);
+    const stale = expired ? current.botMessageId : messageId;
+    if (stale !== null) await tg.api.deleteMessage(user.telegramId, stale).catch(() => undefined);
   }
 }
 

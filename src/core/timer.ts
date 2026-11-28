@@ -4,7 +4,6 @@ import {
   expireTimer,
   loadTimer,
   pauseTimer,
-  restoreTimer,
   resumeTimer,
   setTimerMessage,
   startTimer,
@@ -21,11 +20,11 @@ export type TimerOutcome = "ok" | "invalid" | "not_found" | "busy";
 /** `previous` — таймер до «Продолжить» (у `again`). */
 export type TimerResult = { outcome: TimerOutcome; timer?: TimerView; today?: TodayView; previous?: TimerView };
 
-/** Идет (есть время окончания), на паузе или остановлен (время вышло или нажали «Стоп»). */
-function view(row: TimerRow | undefined): TimerView | undefined {
+/** Идет (время окончания впереди), на паузе или остановлен (время вышло, даже если будильник еще не сработал, или нажали «Стоп»). */
+function view(row: TimerRow | undefined, now: number): TimerView | undefined {
   if (!row) return undefined;
   const { pausedAt, ...rest } = row;
-  const state: TimerState = row.endsAt !== null ? "running" : pausedAt !== null ? "paused" : "ended";
+  const state: TimerState = row.endsAt !== null && row.endsAt > now ? "running" : pausedAt !== null ? "paused" : "ended";
   return { ...rest, state };
 }
 
@@ -53,15 +52,17 @@ async function startFor(
     { userId: user.id, kind: "task", itemId: row.itemId, minutes, startedIn: place, botMessageId },
     now,
   );
-  return { outcome: written.changed > 0 ? "ok" : written.timer ? "busy" : "not_found", timer: view(written.timer) };
+  return { outcome: written.changed > 0 ? "ok" : written.timer ? "busy" : "not_found", timer: view(written.timer, now) };
 }
 
-const changedOr = (written: { changed: number; timer?: TimerRow }): TimerResult =>
-  written.changed > 0 ? { outcome: "ok", timer: view(written.timer) } : { outcome: written.timer ? "invalid" : "not_found", timer: view(written.timer) };
+const changedOr = (written: { changed: number; timer?: TimerRow }, now: number): TimerResult =>
+  written.changed > 0
+    ? { outcome: "ok", timer: view(written.timer, now) }
+    : { outcome: written.timer ? "invalid" : "not_found", timer: view(written.timer, now) };
 
 export const timer = {
-  async current(db: Db, userId: string): Promise<TimerView | undefined> {
-    return view(await loadTimer(db, userId));
+  async current(db: Db, userId: string, now: number): Promise<TimerView | undefined> {
+    return view(await loadTimer(db, userId), now);
   },
 
   /**
@@ -87,10 +88,9 @@ export const timer = {
   /** «Продолжить» после «Стоп» или окончания: таймер той же задачи снова, с новой длиной. QUERY BUDGET EXCEPTION: таймер, план дня, запись. */
   async again(db: Db, user: DayUser, now: number, minutes: number, place: TimerPlace, botMessageId: number | null = null): Promise<TimerResult> {
     if (!validMinutes(minutes)) return { outcome: "invalid" };
-    const current = view(await loadTimer(db, user.id));
+    const current = view(await loadTimer(db, user.id), now);
     if (!current) return { outcome: "not_found" };
-    const ended = current.state === "ended" || (current.endsAt !== null && current.endsAt <= now);
-    if (!ended || current.kind !== "task") return { outcome: "invalid", timer: current };
+    if (current.state !== "ended" || current.kind !== "task") return { outcome: "invalid", timer: current };
     const today = await day.today(db, user, now);
     const row = workRows(today).find((task) => task.itemId === current.itemId);
     if (!row) return { outcome: "not_found", timer: current, today };
@@ -98,25 +98,28 @@ export const timer = {
   },
 
   async pause(db: Db, userId: string, now: number): Promise<TimerResult> {
-    return changedOr(await pauseTimer(db, userId, now));
+    return changedOr(await pauseTimer(db, userId, now), now);
   },
 
   async resume(db: Db, userId: string, now: number): Promise<TimerResult> {
-    return changedOr(await resumeTimer(db, userId, now));
+    return changedOr(await resumeTimer(db, userId, now), now);
   },
 
-  async stop(db: Db, userId: string): Promise<TimerResult> {
-    return changedOr(await stopTimer(db, userId));
+  async stop(db: Db, userId: string, now: number): Promise<TimerResult> {
+    return changedOr(await stopTimer(db, userId), now);
   },
 
-  /** Будильник: если время таймера вышло, таймер останавливается (в ответе ok и таймер); иначе — текущий таймер. */
-  async expire(db: Db, userId: string, now: number): Promise<TimerResult> {
-    return changedOr(await expireTimer(db, userId, now));
+  /**
+   * Будильник: таймер, время которого вышло (`endsAt` — окончание, которое видел будильник), останавливается;
+   * `messageId` — новое сообщение «Время вышло» в боте. Если таймер с тех пор изменили, ничего не меняется (false).
+   */
+  async expire(db: Db, userId: string, endsAt: number, messageId: number | null): Promise<boolean> {
+    return (await expireTimer(db, userId, endsAt, messageId)) > 0;
   },
 
-  /** «Время вышло» не отправилось: таймер снова ждет будильника с окончанием `endsAt`. */
-  async restore(db: Db, userId: string, itemId: string, endsAt: number): Promise<void> {
-    await restoreTimer(db, userId, itemId, endsAt);
+  /** Таймер в базе идет, и его время вышло: будильнику пора сработать. */
+  due(current: TimerView | undefined, now: number): current is TimerView & { endsAt: number } {
+    return current !== undefined && current.endsAt !== null && current.endsAt <= now;
   },
 
   async setMessage(db: Db, userId: string, itemId: string, messageId: number | null): Promise<void> {
@@ -129,7 +132,7 @@ export const timer = {
    * В ответе — таймер до нажатия и план дня. QUERY BUDGET EXCEPTION: таймер, план дня и действие над строкой плана.
    */
   async close(db: Db, user: DayUser, now: number, action: "finish" | "later" | "back", body?: unknown): Promise<TimerResult> {
-    const current = view(await loadTimer(db, user.id));
+    const current = view(await loadTimer(db, user.id), now);
     if (!current || current.kind !== "task") return { outcome: "not_found" };
     if (action === "later") {
       const dropped = await dropTimer(db, user.id, current.itemId);

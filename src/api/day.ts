@@ -14,7 +14,7 @@ function reply(c: Context<ApiEnv>, result: DayResult) {
 
 /** План дня и таймер пользователя (страница показывает таймер над «Пять задач»). QUERY BUDGET EXCEPTION: план дня и таймер. */
 dayRoutes.get("/today", requireUser, async (c) => {
-  const [view, current] = await Promise.all([day.today(c.var.db, c.var.user, Date.now()), timer.current(c.var.db, c.var.user.id)]);
+  const [view, current] = await Promise.all([day.today(c.var.db, c.var.user, Date.now()), timer.current(c.var.db, c.var.user.id, Date.now())]);
   return c.json({ ...view, timer: current ?? null, timerMinutes: defaults.timerMinutes });
 });
 

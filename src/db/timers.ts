@@ -105,14 +105,6 @@ export function pauseTimer(db: Db, userId: string, now: number): Promise<TimerWr
   );
 }
 
-/** Возвращает остановленному будильником таймеру время окончания `endsAt` (сообщение «Время вышло» не отправилось). */
-export async function restoreTimer(db: Db, userId: string, itemId: string, endsAt: number): Promise<void> {
-  await db.$client
-    .prepare("UPDATE timers SET ends_at = ? WHERE user_id = ? AND item_id = ? AND ends_at IS NULL AND paused_at IS NULL")
-    .bind(endsAt, userId, itemId)
-    .run();
-}
-
 /** «Продолжить» после паузы: время идет дальше с того же остатка. */
 export function resumeTimer(db: Db, userId: string, now: number): Promise<TimerWrite> {
   return write(
@@ -141,13 +133,13 @@ export function stopTimer(db: Db, userId: string): Promise<TimerWrite> {
   );
 }
 
-/** Будильник: таймер, у которого время вышло, останавливается. */
-export function expireTimer(db: Db, userId: string, now: number): Promise<TimerWrite> {
-  return write(
-    db,
-    userId,
-    db.$client.prepare("UPDATE timers SET ends_at = NULL WHERE user_id = ? AND ends_at IS NOT NULL AND ends_at <= ?").bind(userId, now),
-  );
+/** Будильник: таймер с окончанием `endsAt` останавливается, его сообщение в боте — `messageId`; возвращает число изменений. */
+export async function expireTimer(db: Db, userId: string, endsAt: number, messageId: number | null): Promise<number> {
+  const result = await db.$client
+    .prepare("UPDATE timers SET ends_at = NULL, bot_message_id = COALESCE(?, bot_message_id) WHERE user_id = ? AND ends_at = ?")
+    .bind(messageId, userId, endsAt)
+    .run();
+  return result.meta.changes;
 }
 
 /** Сообщение бота, в котором показывается таймер записи `itemId`. */

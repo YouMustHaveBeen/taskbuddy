@@ -42,7 +42,7 @@ async function arm(c: Context<ApiEnv>, result: TimerResult) {
   }
 }
 
-timerRoutes.get("/timer", requireUser, async (c) => c.json({ timer: (await timer.current(c.var.db, c.var.user.id)) ?? null }));
+timerRoutes.get("/timer", requireUser, async (c) => c.json({ timer: (await timer.current(c.var.db, c.var.user.id, Date.now())) ?? null }));
 
 timerRoutes.post("/timer/start/:slot/:position/:minutes", requireUser, async (c) => {
   const target = { slot: c.req.param("slot"), position: Number(c.req.param("position")), minutes: Number(c.req.param("minutes")) };
@@ -67,7 +67,7 @@ for (const action of ["pause", "resume", "stop"] as const) {
         ? await timer.pause(c.var.db, c.var.user.id, now)
         : action === "resume"
           ? await timer.resume(c.var.db, c.var.user.id, now)
-          : await timer.stop(c.var.db, c.var.user.id);
+          : await timer.stop(c.var.db, c.var.user.id, now);
     if (action === "resume") await arm(c, result);
     if (result.outcome === "ok") syncBot(c, undefined, result.timer);
     return reply(c, result);
